@@ -230,6 +230,56 @@ if run_btn:
         ax3.legend()
         st.pyplot(fig3)
 
+    # ===== 每个特征的拟合曲线图（其他特征固定为均值/众数）=====
+    st.subheader("特征拟合曲线（其他特征固定为均值）")
+    fill_vals = {}
+    for i, c in enumerate(feature_cols):
+        if c in le_dict:
+            fill_vals[c] = int(pd.Series(X[:, i]).mode().iloc[0])
+        else:
+            fill_vals[c] = float(np.nanmean(X[:, i]))
+
+    grid_n = 100
+    n_feat = len(feature_cols)
+    ncols = 2
+    nrows = int(np.ceil(n_feat / ncols))
+    fig4, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 4 * nrows), squeeze=False)
+    for idx, c in enumerate(feature_cols):
+        ax = axes[idx // ncols][idx % ncols]
+        i = feature_cols.index(c)
+        # 原始散点
+        ax.scatter(X[:, i], y, alpha=0.5, color="#4C9AFF", s=20, label="样本")
+        # 生成该特征的网格
+        if c in le_dict:
+            # 类别列：画每条类别的水平线
+            cats = sorted(set(X[:, i].astype(int)))
+            xs = []
+            for cat in cats:
+                row = np.array([[fill_vals[f] for f in feature_cols]], dtype=float)
+                row[0, i] = cat
+                xs.append(cat)
+            X_grid = np.tile(np.array([[fill_vals[f] for f in feature_cols]], dtype=float), (len(cats), 1))
+            X_grid[:, i] = np.array(cats)
+            y_grid = model.predict(scaler.transform(X_grid))
+            ax.plot(cats, y_grid, "ro-", label="拟合")
+            ax.set_xticks(cats)
+        else:
+            x_min, x_max = X[:, i].min(), X[:, i].max()
+            xs = np.linspace(x_min, x_max, grid_n)
+            X_grid = np.tile(np.array([[fill_vals[f] for f in feature_cols]], dtype=float), (grid_n, 1))
+            X_grid[:, i] = xs
+            y_grid = model.predict(scaler.transform(X_grid))
+            ax.plot(xs, y_grid, "r-", lw=2, label="拟合曲线")
+        ax.set_xlabel(c)
+        ax.set_ylabel(target_col)
+        ax.set_title(f"{c} → {target_col}")
+        ax.legend(fontsize=8)
+    # 隐藏多余子图
+    for j in range(n_feat, nrows * ncols):
+        axes[j // ncols][j % ncols].axis("off")
+    fig4.tight_layout()
+    st.pyplot(fig4)
+
     result_df = pd.DataFrame({"真实值": y_test, "预测值": y_pred, "误差": y_test - y_pred})
     if y_std is not None:
         result_df["预测标准差"] = y_std
@@ -258,15 +308,7 @@ if run_btn:
     st.session_state["feature_cols"] = feature_cols
     st.session_state["target_col"] = target_col
     st.session_state["is_gpr"] = is_gpr
-
-    # 计算每个特征的缺失填充值（数值列用均值，类别列用众数编码值）
-    fill_values = {}
-    for i, c in enumerate(feature_cols):
-        if c in le_dict:
-            fill_values[c] = int(pd.Series(X[:, i]).mode().iloc[0])
-        else:
-            fill_values[c] = float(np.nanmean(X[:, i]))
-    st.session_state["fill_values"] = fill_values
+    st.session_state["fill_values"] = fill_vals
 
 st.divider()
 st.subheader("用训练好的模型预测新样本（留空的特征自动用训练集均值/众数填充）")
