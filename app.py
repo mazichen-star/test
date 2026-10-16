@@ -68,14 +68,15 @@ cat_cols = [c for c in df.columns if c not in numeric_cols]
 
 col1, col2 = st.columns(2)
 with col1:
-    target_col = st.selectbox("目标列（要预测的力学性能）", df.columns)
+    target_col = st.selectbox("目标列（要预测的力学性能）", df.columns, key="target_col_select")
 with col2:
     candidate_features = [c for c in df.columns if c != target_col]
-    default_features = [c for c in numeric_cols if c != target_col]
     feature_cols = st.multiselect(
         "特征列（输入参数）",
-        candidate_features, default=[]
+        candidate_features, default=[], key="feature_cols_multi"
     )
+    # 自动剔除意外混入的目标列
+    feature_cols = [c for c in feature_cols if c != target_col]
 
 if not feature_cols:
     st.warning("请至少选择一个特征列。")
@@ -121,7 +122,7 @@ gpr_kernel_options = {
 
 # 树模型/迭代模型的轮数（n_estimators），用户可调
 n_estimators = st.slider("训练轮数（树模型迭代次数，越大越拟合，过大会过拟合）",
-                          50, 1000, 300, step=50)
+                          50, 1000, 300, step=50, key="n_est_slider")
 
 model_options = {
     "线性回归": LinearRegression(),
@@ -140,14 +141,14 @@ model_options = {
                                   learning_rate_init=0.001, random_state=42),
 }
 
-model_name = st.selectbox("选择模型", list(model_options.keys()) + ["高斯过程回归 (GPR)"])
+model_name = st.selectbox("选择模型", list(model_options.keys()) + ["高斯过程回归 (GPR)"], key="model_select")
 
 gpr_kernel_name = None
 if model_name == "高斯过程回归 (GPR)":
-    gpr_kernel_name = st.selectbox("GPR 核函数", list(gpr_kernel_options.keys()))
+    gpr_kernel_name = st.selectbox("GPR 核函数", list(gpr_kernel_options.keys()), key="gpr_kernel_select")
     st.caption("注意：GPR 复杂度 O(n^3)，样本数建议 < 2000；它还能输出预测不确定性（置信区间）。")
 
-test_size = st.slider("测试集比例", 0.1, 0.4, 0.2, 0.05)
+test_size = st.slider("测试集比例", 0.1, 0.4, 0.2, 0.05, key="test_size_slider")
 run_btn = st.button("开始训练与预测", type="primary")
 
 if run_btn:
