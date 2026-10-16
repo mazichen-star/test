@@ -73,8 +73,8 @@ with col2:
     candidate_features = [c for c in df.columns if c != target_col]
     default_features = [c for c in numeric_cols if c != target_col]
     feature_cols = st.multiselect(
-        "特征列（输入参数；数值列已预选，类别列可选）",
-        candidate_features, default=default_features
+        "特征列（输入参数）",
+        candidate_features, default=[]
     )
 
 if not feature_cols:
