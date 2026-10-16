@@ -16,12 +16,12 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 import matplotlib.pyplot as plt
 import io
 
-st.set_page_config(page_title="力学性能预测系统", page_icon="🔬", layout="wide")
-st.title("🔬 材料力学性能预测系统")
+st.set_page_config(page_title="力学性能预测系统", layout="wide")
+st.title("材料力学性能预测系统")
 st.markdown("上传 CSV / Excel 数据，训练回归模型，预测材料力学性能（抗拉强度、屈服强度、弹性模量、延伸率等）。")
 
 with st.sidebar:
-    st.header("⚙️ 配置")
+    st.header("配置")
     uploaded_file = st.file_uploader("上传数据文件", type=["csv", "xlsx", "xls"])
 
 
@@ -34,11 +34,11 @@ def load_data(file):
 
 
 if uploaded_file is None:
-    st.info("👈 请在左侧上传数据文件开始使用。")
+    st.info("请在左侧上传数据文件开始使用。")
     st.stop()
 
 df = load_data(uploaded_file)
-st.subheader("📋 数据预览")
+st.subheader("数据预览")
 st.dataframe(df.head(10), use_container_width=True)
 st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**")
 
@@ -49,12 +49,12 @@ if cat_cols:
 
 col1, col2 = st.columns(2)
 with col1:
-    target_col = st.selectbox("🎯 目标列（要预测的力学性能）", df.columns)
+    target_col = st.selectbox("目标列（要预测的力学性能）", df.columns)
 with col2:
     candidate_features = [c for c in df.columns if c != target_col]
     default_features = [c for c in numeric_cols if c != target_col]
     feature_cols = st.multiselect(
-        "📊 特征列（输入参数；数值列已预选，类别列可选）",
+        "特征列（输入参数；数值列已预选，类别列可选）",
         candidate_features, default=default_features
     )
 
@@ -91,7 +91,7 @@ def preprocess(df_raw, feature_cols, target_col, le_dict=None, fit=True):
     return X, y, data, le_dict
 
 
-st.subheader("🤖 模型设置")
+st.subheader("模型设置")
 
 gpr_kernel_options = {
     "RBF + 白噪声": C(1.0, (1e-3, 1e3)) * RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e2))
@@ -114,10 +114,10 @@ model_name = st.selectbox("选择模型", list(model_options.keys()) + ["高斯�
 gpr_kernel_name = None
 if model_name == "高斯过程回归 (GPR)":
     gpr_kernel_name = st.selectbox("GPR 核函数", list(gpr_kernel_options.keys()))
-    st.caption("⚠️ GPR 复杂度 O(n³)，样本数建议 < 2000；它还能输出预测不确定性（置信区间）。")
+    st.caption("注意：GPR 复杂度 O(n^3)，样本数建议 < 2000；它还能输出预测不确定性（置信区间）。")
 
 test_size = st.slider("测试集比例", 0.1, 0.4, 0.2, 0.05)
-run_btn = st.button("🚀 开始训练与预测", type="primary")
+run_btn = st.button("开始训练与预测", type="primary")
 
 if run_btn:
     X, y, data, le_dict = preprocess(df, feature_cols, target_col, fit=True)
@@ -162,27 +162,27 @@ if run_btn:
     m4.metric("5 折交叉验证 R²", f"{cv_r2:.4f}")
 
     if hasattr(model, "feature_importances_"):
-        st.subheader("📈 特征重要性")
+        st.subheader("特征重要性")
         importances = pd.Series(model.feature_importances_, index=feature_cols).sort_values(ascending=True)
         fig, ax = plt.subplots(figsize=(8, 0.35 * len(feature_cols)))
         importances.plot.barh(ax=ax, color="#4C9AFF")
         ax.set_xlabel("重要性得分")
         st.pyplot(fig)
 
-    st.subheader("📊 预测值 vs 真实值")
+    st.subheader("预测值 vs 真实值")
     fig2, ax2 = plt.subplots(figsize=(6, 6))
     ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E")
     lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
     ax2.plot(lims, lims, "r--", lw=2)
     ax2.set_xlabel("真实值"); ax2.set_ylabel("预测值")
-    title = f"{model_name}  (R²={r2:.3f})"
+    title = f"{model_name}  (R2={r2:.3f})"
     if is_gpr:
         title += f"\n最优核: {model.kernel_}"
     ax2.set_title(title)
     st.pyplot(fig2)
 
     if is_gpr:
-        st.subheader("📊 测试集预测带 ±95% 置信区间")
+        st.subheader("测试集预测带 +/-95% 置信区间")
         order = np.argsort(y_test)
         fig3, ax3 = plt.subplots(figsize=(8, 4))
         ax3.plot(range(len(y_test)), y_test[order], "k.", label="真实值")
@@ -198,7 +198,7 @@ if run_btn:
     result_df = pd.DataFrame({"真实值": y_test, "预测值": y_pred, "误差": y_test - y_pred})
     if y_std is not None:
         result_df["预测标准差"] = y_std
-    st.subheader("📋 预测结果明细")
+    st.subheader("预测结果明细")
     st.dataframe(result_df, use_container_width=True)
 
     X_all_s = scaler.transform(X)
@@ -214,7 +214,7 @@ if run_btn:
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         data_out.to_excel(writer, index=False, sheet_name="预测结果")
     buf.seek(0)
-    st.download_button("💾 下载含预测列的 Excel", buf, file_name="prediction_result.xlsx",
+    st.download_button("下载含预测列的 Excel", buf, file_name="prediction_result.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     st.session_state["model"] = model
@@ -225,7 +225,7 @@ if run_btn:
     st.session_state["is_gpr"] = is_gpr
 
 st.divider()
-st.subheader("🔮 用训练好的模型预测新样本")
+st.subheader("用训练好的模型预测新样本")
 
 if "model" in st.session_state:
     fcols = st.session_state["feature_cols"]
@@ -245,7 +245,7 @@ if "model" in st.session_state:
         x_new = st.session_state["scaler"].transform(np.array(input_vals).reshape(1, -1))
         if st.session_state.get("is_gpr"):
             pred, std = st.session_state["model"].predict(x_new, return_std=True)
-            st.success(f"预测的 **{st.session_state['target_col']}** = **{pred[0]:.4f} ± {1.96*std[0]:.4f}** (95% CI)")
+            st.success(f"预测的 **{st.session_state['target_col']}** = **{pred[0]:.4f} +/- {1.96*std[0]:.4f}** (95% CI)")
         else:
             pred = st.session_state["model"].predict(x_new)
             st.success(f"预测的 **{st.session_state['target_col']}** = **{pred[0]:.4f}**")
