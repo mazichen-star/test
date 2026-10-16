@@ -203,32 +203,32 @@ if run_btn:
     y_axis_label = target_col
 
     st.subheader("预测值 vs 真实值")
-    fig2, ax2 = plt.subplots(figsize=(3.5, 2.5))
-    ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E")
+    fig2, ax2 = plt.subplots(figsize=(7, 4))
+    ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E", s=20)
     lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
     ax2.plot(lims, lims, "r--", lw=2)
-    ax2.set_xlabel(f"真实 {y_axis_label}", fontsize=8)
-    ax2.set_ylabel(f"预测 {y_axis_label}", fontsize=8)
-    ax2.tick_params(labelsize=7)
-    title = f"{model_name}  R2={r2:.3f}"
-    ax2.set_title(title, fontsize=9)
+    ax2.set_xlabel(f"真实 {y_axis_label}", fontsize=9)
+    ax2.set_ylabel(f"预测 {y_axis_label}", fontsize=9)
+    ax2.tick_params(labelsize=8)
+    ax2.set_title(f"{model_name}  R2={r2:.3f}", fontsize=10)
     if is_gpr:
-        fig2.text(0.5, -0.05, f"核: {model.kernel_}", ha="center", fontsize=6, color="gray")
+        fig2.text(0.5, -0.08, f"核: {model.kernel_}", ha="center", fontsize=7, color="gray")
     st.pyplot(fig2)
 
     if is_gpr:
         st.subheader("测试集预测带 +/-95% 置信区间")
         order = np.argsort(y_test)
-        fig3, ax3 = plt.subplots(figsize=(5.5, 3.2))
-        ax3.plot(range(len(y_test)), y_test[order], "k.", label="真实值")
-        ax3.plot(range(len(y_test)), y_pred[order], "-", color="#4C9AFF", label="预测均值")
+        fig3, ax3 = plt.subplots(figsize=(7, 4))
+        ax3.plot(range(len(y_test)), y_test[order], "k.", label="真实值", markersize=4)
+        ax3.plot(range(len(y_test)), y_pred[order], "-", color="#4C9AFF", label="预测均值", lw=1.5)
         ax3.fill_between(range(len(y_test)),
                          y_pred[order] - 1.96 * y_std[order],
                          y_pred[order] + 1.96 * y_std[order],
                          alpha=0.3, color="#4C9AFF", label="95% 置信区间")
-        ax3.set_xlabel("样本序号")
-        ax3.set_ylabel(y_axis_label)
-        ax3.legend()
+        ax3.set_xlabel("样本序号", fontsize=9)
+        ax3.set_ylabel(y_axis_label, fontsize=9)
+        ax3.tick_params(labelsize=8)
+        ax3.legend(fontsize=8)
         st.pyplot(fig3)
 
     # ===== 每个特征的拟合曲线图（其他特征固定为均值/众数）=====
@@ -278,9 +278,10 @@ if run_btn:
                         xytext=(8, dy),
                         textcoords="offset points", fontsize=8, color=color,
                         arrowprops=dict(arrowstyle="->", color=color, lw=0.8))
-        ax.set_xlabel(c)
-        ax.set_ylabel(target_col)
-        ax.set_title(f"{c} → {target_col}")
+        ax.set_xlabel(c, fontsize=9)
+        ax.set_ylabel(target_col, fontsize=9)
+        ax.tick_params(labelsize=8)
+        ax.set_title(f"{c} → {target_col}", fontsize=10)
         ax.legend(fontsize=8, loc="best")
     # 隐藏多余子图
     for j in range(n_feat, nrows * ncols):
