@@ -243,23 +243,44 @@ if run_btn:
     st.session_state["target_col"] = target_col
     st.session_state["is_gpr"] = is_gpr
 
+    # 计算每个特征的缺失填充值（数值列用均值，类别列用众数编码值）
+    fill_values = {}
+    for i, c in enumerate(feature_cols):
+        if c in le_dict:
+            fill_values[c] = int(pd.Series(X[:, i]).mode().iloc[0])
+        else:
+            fill_values[c] = float(np.nanmean(X[:, i]))
+    st.session_state["fill_values"] = fill_values
+
 st.divider()
-st.subheader("用训练好的模型预测新样本")
+st.subheader("用训练好的模型预测新样本（留空的特征自动用训练集均值/众数填充）")
 
 if "model" in st.session_state:
     fcols = st.session_state["feature_cols"]
     led = st.session_state["le_dict"]
+    fill_vals = st.session_state["fill_values"]
     input_vals = []
     cols = st.columns(min(len(fcols), 4))
     for i, f in enumerate(fcols):
         with cols[i % 4]:
             if f in led:
-                options = list(led[f].classes_)
+                options = ["（未知/留空）"] + list(led[f].classes_)
                 v = st.selectbox(f, options, key=f"new_{f}")
-                input_vals.append(led[f].transform([v])[0])
+                if v == "（未知/留空）":
+                    input_vals.append(fill_vals[f])
+                else:
+                    input_vals.append(led[f].transform([v])[0])
             else:
-                v = st.number_input(f, value=0.0, key=f"new_{f}")
-                input_vals.append(v)
+                raw = st.text_input(f, value="", key=f"new_{f}",
+                                    help="留空则用训练集均值 {:.4g} 填充".format(fill_vals[f]))
+                if raw.strip() == "":
+                    input_vals.append(fill_vals[f])
+                else:
+                    try:
+                        input_vals.append(float(raw))
+                    except ValueError:
+                        st.warning(f"「{f}」输入不是数字，已用均值填充")
+                        input_vals.append(fill_vals[f])
     if st.button("预测", type="secondary"):
         x_new = st.session_state["scaler"].transform(np.array(input_vals).reshape(1, -1))
         if st.session_state.get("is_gpr"):
