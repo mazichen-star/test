@@ -17,8 +17,13 @@ import matplotlib.pyplot as plt
 import matplotlib
 import io
 
-# 解决 matplotlib 中文显示方块问题
-matplotlib.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
+# 解决 matplotlib 中文显示方块问题（兼容 Windows / Linux / Streamlit Cloud）
+matplotlib.rcParams["font.sans-serif"] = [
+    "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK TC",
+    "WenQuanYi Zen Hei", "WenQuanYi Micro Hei",
+    "Microsoft YaHei", "SimHei", "PingFang SC", "Heiti SC",
+    "DejaVu Sans"
+]
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 st.set_page_config(page_title="力学性能预测系统", layout="wide")
