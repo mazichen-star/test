@@ -207,12 +207,13 @@ if run_btn:
     ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E")
     lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
     ax2.plot(lims, lims, "r--", lw=2)
-    ax2.set_xlabel(f"真实 {y_axis_label}")
-    ax2.set_ylabel(f"预测 {y_axis_label}")
-    title = f"{model_name}  (R2={r2:.3f})"
+    ax2.set_xlabel(f"真实 {y_axis_label}", fontsize=8)
+    ax2.set_ylabel(f"预测 {y_axis_label}", fontsize=8)
+    ax2.tick_params(labelsize=7)
+    title = f"{model_name}  R2={r2:.3f}"
+    ax2.set_title(title, fontsize=9)
     if is_gpr:
-        title += f"\n最优核: {model.kernel_}"
-    ax2.set_title(title)
+        fig2.text(0.5, -0.05, f"核: {model.kernel_}", ha="center", fontsize=6, color="gray")
     st.pyplot(fig2)
 
     if is_gpr:
