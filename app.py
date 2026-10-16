@@ -217,79 +217,77 @@ if run_btn:
             fig2.text(0.5, -0.15, f"核: {model.kernel_}", ha="center", fontsize=5, color="gray")
         st.pyplot(fig2)
 
-    if is_gpr:
-        st.subheader("测试集预测带 +/-95% 置信区间")
-        order = np.argsort(y_test)
-        fig3, ax3 = plt.subplots(figsize=(7, 4))
-        ax3.plot(range(len(y_test)), y_test[order], "k.", label="真实值", markersize=4)
-        ax3.plot(range(len(y_test)), y_pred[order], "-", color="#4C9AFF", label="预测均值", lw=1.5)
-        ax3.fill_between(range(len(y_test)),
-                         y_pred[order] - 1.96 * y_std[order],
-                         y_pred[order] + 1.96 * y_std[order],
-                         alpha=0.3, color="#4C9AFF", label="95% 置信区间")
-        ax3.set_xlabel("样本序号", fontsize=9)
-        ax3.set_ylabel(y_axis_label, fontsize=9)
-        ax3.tick_params(labelsize=8)
-        ax3.legend(fontsize=8)
-        st.pyplot(fig3)
+    left_col, _ = st.columns(2)
+    with left_col:
+        if is_gpr:
+            st.subheader("测试集预测带 +/-95% 置信区间")
+            order = np.argsort(y_test)
+            fig3, ax3 = plt.subplots(figsize=(7, 4))
+            ax3.plot(range(len(y_test)), y_test[order], "k.", label="真实值", markersize=4)
+            ax3.plot(range(len(y_test)), y_pred[order], "-", color="#4C9AFF", label="预测均值", lw=1.5)
+            ax3.fill_between(range(len(y_test)),
+                             y_pred[order] - 1.96 * y_std[order],
+                             y_pred[order] + 1.96 * y_std[order],
+                             alpha=0.3, color="#4C9AFF", label="95% 置信区间")
+            ax3.set_xlabel("样本序号", fontsize=9)
+            ax3.set_ylabel(y_axis_label, fontsize=9)
+            ax3.tick_params(labelsize=8)
+            ax3.legend(fontsize=8)
+            st.pyplot(fig3)
 
     # ===== 每个特征的拟合曲线图（其他特征固定为均值/众数）=====
-    st.subheader("特征拟合曲线（其他特征固定为均值）")
-    fill_vals = {}
-    for i, c in enumerate(feature_cols):
-        if c in le_dict:
-            fill_vals[c] = int(pd.Series(X[:, i]).mode().iloc[0])
-        else:
-            fill_vals[c] = float(np.nanmean(X[:, i]))
+    left_col2, _ = st.columns(2)
+    with left_col2:
+        st.subheader("特征拟合曲线（其他特征固定为均值）")
+        fill_vals = {}
+        for i, c in enumerate(feature_cols):
+            if c in le_dict:
+                fill_vals[c] = int(pd.Series(X[:, i]).mode().iloc[0])
+            else:
+                fill_vals[c] = float(np.nanmean(X[:, i]))
 
-    grid_n = 100
-    n_feat = len(feature_cols)
-    ncols = 2
-    nrows = int(np.ceil(n_feat / ncols))
-    fig4, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 4 * nrows), squeeze=False)
-    for idx, c in enumerate(feature_cols):
-        ax = axes[idx // ncols][idx % ncols]
-        i = feature_cols.index(c)
-        # 原始散点
-        ax.scatter(X[:, i], y, alpha=0.5, color="#4C9AFF", s=20, label="样本")
-        # 生成该特征的网格
-        if c in le_dict:
-            cats = sorted(set(X[:, i].astype(int)))
-            X_grid = np.tile(np.array([[fill_vals[f] for f in feature_cols]], dtype=float), (len(cats), 1))
-            X_grid[:, i] = np.array(cats)
-            y_grid = model.predict(scaler.transform(X_grid))
-            ax.plot(cats, y_grid, "ro-", label="拟合")
-            ax.set_xticks(cats)
-            xs_plot = np.array(cats, dtype=float)
-        else:
-            x_min, x_max = X[:, i].min(), X[:, i].max()
-            xs = np.linspace(x_min, x_max, grid_n)
-            X_grid = np.tile(np.array([[fill_vals[f] for f in feature_cols]], dtype=float), (grid_n, 1))
-            X_grid[:, i] = xs
-            y_grid = model.predict(scaler.transform(X_grid))
-            ax.plot(xs, y_grid, "r-", lw=2, label="拟合曲线")
-            xs_plot = xs
+        grid_n = 100
+        n_feat = len(feature_cols)
+        ncols = 1
+        nrows = n_feat
+        fig4, axes = plt.subplots(nrows, ncols, figsize=(7, 4 * nrows), squeeze=False)
+        for idx, c in enumerate(feature_cols):
+            ax = axes[idx][0]
+            i = feature_cols.index(c)
+            ax.scatter(X[:, i], y, alpha=0.5, color="#4C9AFF", s=20, label="样本")
+            if c in le_dict:
+                cats = sorted(set(X[:, i].astype(int)))
+                X_grid = np.tile(np.array([[fill_vals[f] for f in feature_cols]], dtype=float), (len(cats), 1))
+                X_grid[:, i] = np.array(cats)
+                y_grid = model.predict(scaler.transform(X_grid))
+                ax.plot(cats, y_grid, "ro-", label="拟合")
+                ax.set_xticks(cats)
+                xs_plot = np.array(cats, dtype=float)
+            else:
+                x_min, x_max = X[:, i].min(), X[:, i].max()
+                xs = np.linspace(x_min, x_max, grid_n)
+                X_grid = np.tile(np.array([[fill_vals[f] for f in feature_cols]], dtype=float), (grid_n, 1))
+                X_grid[:, i] = xs
+                y_grid = model.predict(scaler.transform(X_grid))
+                ax.plot(xs, y_grid, "r-", lw=2, label="拟合曲线")
+                xs_plot = xs
 
-        # 标出预测最大值和最小值（同时显示横坐标和纵坐标）
-        imax = int(np.argmax(y_grid))
-        imin = int(np.argmin(y_grid))
-        for idx_ext, color, txt, dy in [(imax, "#228B22", "最大", 10), (imin, "#B22222", "最小", -16)]:
-            ax.scatter(xs_plot[idx_ext], y_grid[idx_ext], s=90, color=color, zorder=5, edgecolors="white")
-            ax.annotate(f"{txt}: x={xs_plot[idx_ext]:.3g}, y={y_grid[idx_ext]:.3g}",
-                        xy=(xs_plot[idx_ext], y_grid[idx_ext]),
-                        xytext=(8, dy),
-                        textcoords="offset points", fontsize=8, color=color,
-                        arrowprops=dict(arrowstyle="->", color=color, lw=0.8))
-        ax.set_xlabel(c, fontsize=9)
-        ax.set_ylabel(target_col, fontsize=9)
-        ax.tick_params(labelsize=8)
-        ax.set_title(f"{c} → {target_col}", fontsize=10)
-        ax.legend(fontsize=8, loc="best")
-    # 隐藏多余子图
-    for j in range(n_feat, nrows * ncols):
-        axes[j // ncols][j % ncols].axis("off")
-    fig4.tight_layout()
-    st.pyplot(fig4)
+            imax = int(np.argmax(y_grid))
+            imin = int(np.argmin(y_grid))
+            for idx_ext, color, txt, dy in [(imax, "#228B22", "最大", 10), (imin, "#B22222", "最小", -16)]:
+                ax.scatter(xs_plot[idx_ext], y_grid[idx_ext], s=90, color=color, zorder=5, edgecolors="white")
+                ax.annotate(f"{txt}: x={xs_plot[idx_ext]:.3g}, y={y_grid[idx_ext]:.3g}",
+                            xy=(xs_plot[idx_ext], y_grid[idx_ext]),
+                            xytext=(8, dy),
+                            textcoords="offset points", fontsize=8, color=color,
+                            arrowprops=dict(arrowstyle="->", color=color, lw=0.8))
+            ax.set_xlabel(c, fontsize=9)
+            ax.set_ylabel(target_col, fontsize=9)
+            ax.tick_params(labelsize=8)
+            ax.set_title(f"{c} → {target_col}", fontsize=10)
+            ax.legend(fontsize=8, loc="best")
+        fig4.tight_layout()
+        st.pyplot(fig4)
 
     result_df = pd.DataFrame({"真实值": y_test, "预测值": y_pred, "误差": y_test - y_pred})
     if y_std is not None:
