@@ -203,7 +203,7 @@ if run_btn:
     y_axis_label = target_col
 
     st.subheader("预测值 vs 真实值")
-    fig2, ax2 = plt.subplots(figsize=(6, 6))
+    fig2, ax2 = plt.subplots(figsize=(7, 4.5))
     ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E")
     lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
     ax2.plot(lims, lims, "r--", lw=2)
@@ -218,7 +218,7 @@ if run_btn:
     if is_gpr:
         st.subheader("测试集预测带 +/-95% 置信区间")
         order = np.argsort(y_test)
-        fig3, ax3 = plt.subplots(figsize=(8, 4))
+        fig3, ax3 = plt.subplots(figsize=(7, 4))
         ax3.plot(range(len(y_test)), y_test[order], "k.", label="真实值")
         ax3.plot(range(len(y_test)), y_pred[order], "-", color="#4C9AFF", label="预测均值")
         ax3.fill_between(range(len(y_test)),
@@ -251,18 +251,13 @@ if run_btn:
         ax.scatter(X[:, i], y, alpha=0.5, color="#4C9AFF", s=20, label="样本")
         # 生成该特征的网格
         if c in le_dict:
-            # 类别列：画每条类别的水平线
             cats = sorted(set(X[:, i].astype(int)))
-            xs = []
-            for cat in cats:
-                row = np.array([[fill_vals[f] for f in feature_cols]], dtype=float)
-                row[0, i] = cat
-                xs.append(cat)
             X_grid = np.tile(np.array([[fill_vals[f] for f in feature_cols]], dtype=float), (len(cats), 1))
             X_grid[:, i] = np.array(cats)
             y_grid = model.predict(scaler.transform(X_grid))
             ax.plot(cats, y_grid, "ro-", label="拟合")
             ax.set_xticks(cats)
+            xs_plot = np.array(cats, dtype=float)
         else:
             x_min, x_max = X[:, i].min(), X[:, i].max()
             xs = np.linspace(x_min, x_max, grid_n)
@@ -270,10 +265,22 @@ if run_btn:
             X_grid[:, i] = xs
             y_grid = model.predict(scaler.transform(X_grid))
             ax.plot(xs, y_grid, "r-", lw=2, label="拟合曲线")
+            xs_plot = xs
+
+        # 标出预测最大值和最小值
+        imax = int(np.argmax(y_grid))
+        imin = int(np.argmin(y_grid))
+        for idx_ext, color, txt in [(imax, "#228B22", "最大"), (imin, "#B22222", "最小")]:
+            ax.scatter(xs_plot[idx_ext], y_grid[idx_ext], s=90, color=color, zorder=5, edgecolors="white")
+            ax.annotate(f"{txt}: {y_grid[idx_ext]:.3g}",
+                        xy=(xs_plot[idx_ext], y_grid[idx_ext]),
+                        xytext=(8, 8 if idx_ext == imax else -14),
+                        textcoords="offset points", fontsize=8, color=color,
+                        arrowprops=dict(arrowstyle="->", color=color, lw=0.8))
         ax.set_xlabel(c)
         ax.set_ylabel(target_col)
         ax.set_title(f"{c} → {target_col}")
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=8, loc="best")
     # 隐藏多余子图
     for j in range(n_feat, nrows * ncols):
         axes[j // ncols][j % ncols].axis("off")
