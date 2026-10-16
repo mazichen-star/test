@@ -203,7 +203,7 @@ if run_btn:
     y_axis_label = target_col
 
     st.subheader("预测值 vs 真实值")
-    fig2, ax2 = plt.subplots(figsize=(5.5, 3.5))
+    fig2, ax2 = plt.subplots(figsize=(3.5, 2.5))
     ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E")
     lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
     ax2.plot(lims, lims, "r--", lw=2)
