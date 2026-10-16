@@ -203,7 +203,7 @@ if run_btn:
     y_axis_label = target_col
 
     st.subheader("预测值 vs 真实值")
-    fig2, ax2 = plt.subplots(figsize=(7, 4.5))
+    fig2, ax2 = plt.subplots(figsize=(5.5, 3.5))
     ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E")
     lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
     ax2.plot(lims, lims, "r--", lw=2)
@@ -218,7 +218,7 @@ if run_btn:
     if is_gpr:
         st.subheader("测试集预测带 +/-95% 置信区间")
         order = np.argsort(y_test)
-        fig3, ax3 = plt.subplots(figsize=(7, 4))
+        fig3, ax3 = plt.subplots(figsize=(5.5, 3.2))
         ax3.plot(range(len(y_test)), y_test[order], "k.", label="真实值")
         ax3.plot(range(len(y_test)), y_pred[order], "-", color="#4C9AFF", label="预测均值")
         ax3.fill_between(range(len(y_test)),
@@ -267,14 +267,14 @@ if run_btn:
             ax.plot(xs, y_grid, "r-", lw=2, label="拟合曲线")
             xs_plot = xs
 
-        # 标出预测最大值和最小值
+        # 标出预测最大值和最小值（同时显示横坐标和纵坐标）
         imax = int(np.argmax(y_grid))
         imin = int(np.argmin(y_grid))
-        for idx_ext, color, txt in [(imax, "#228B22", "最大"), (imin, "#B22222", "最小")]:
+        for idx_ext, color, txt, dy in [(imax, "#228B22", "最大", 10), (imin, "#B22222", "最小", -16)]:
             ax.scatter(xs_plot[idx_ext], y_grid[idx_ext], s=90, color=color, zorder=5, edgecolors="white")
-            ax.annotate(f"{txt}: {y_grid[idx_ext]:.3g}",
+            ax.annotate(f"{txt}: x={xs_plot[idx_ext]:.3g}, y={y_grid[idx_ext]:.3g}",
                         xy=(xs_plot[idx_ext], y_grid[idx_ext]),
-                        xytext=(8, 8 if idx_ext == imax else -14),
+                        xytext=(8, dy),
                         textcoords="offset points", fontsize=8, color=color,
                         arrowprops=dict(arrowstyle="->", color=color, lw=0.8))
         ax.set_xlabel(c)
