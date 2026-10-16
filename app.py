@@ -15,14 +15,23 @@ from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel, ConstantK
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib import font_manager
+import os
 import io
 
-# 解决 matplotlib 中文显示方块问题（兼容 Windows / Linux / Streamlit Cloud）
+# 解决 matplotlib 中文显示方块问题
+# 优先加载仓库自带的开源中文字体（Noto Sans SC），兼容 Windows / Linux / Streamlit Cloud
+_FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "NotoSansSC-Regular.ttf")
+if os.path.exists(_FONT_PATH):
+    font_manager.fontManager.addfont(_FONT_PATH)
+    _CN_FONT = font_manager.FontProperties(fname=_FONT_PATH).get_name()
+else:
+    _CN_FONT = "Microsoft YaHei"
+
 matplotlib.rcParams["font.sans-serif"] = [
-    "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK TC",
-    "WenQuanYi Zen Hei", "WenQuanYi Micro Hei",
-    "Microsoft YaHei", "SimHei", "PingFang SC", "Heiti SC",
-    "DejaVu Sans"
+    _CN_FONT,
+    "Noto Sans CJK SC", "WenQuanYi Zen Hei",
+    "Microsoft YaHei", "SimHei", "DejaVu Sans"
 ]
 matplotlib.rcParams["axes.unicode_minus"] = False
 
