@@ -202,18 +202,20 @@ if run_btn:
 
     y_axis_label = target_col
 
-    st.subheader("预测值 vs 真实值")
-    fig2, ax2 = plt.subplots(figsize=(3, 1.8))
-    ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E", s=20)
-    lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
-    ax2.plot(lims, lims, "r--", lw=2)
-    ax2.set_xlabel(f"真实 {y_axis_label}", fontsize=7)
-    ax2.set_ylabel(f"预测 {y_axis_label}", fontsize=7)
-    ax2.tick_params(labelsize=6)
-    ax2.set_title(f"{model_name}  R2={r2:.3f}", fontsize=8)
-    if is_gpr:
-        fig2.text(0.5, -0.15, f"核: {model.kernel_}", ha="center", fontsize=5, color="gray")
-    st.pyplot(fig2)
+    left_col, _ = st.columns(2)
+    with left_col:
+        st.subheader("预测值 vs 真实值")
+        fig2, ax2 = plt.subplots(figsize=(3, 1.8))
+        ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E", s=20)
+        lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
+        ax2.plot(lims, lims, "r--", lw=2)
+        ax2.set_xlabel(f"真实 {y_axis_label}", fontsize=7)
+        ax2.set_ylabel(f"预测 {y_axis_label}", fontsize=7)
+        ax2.tick_params(labelsize=6)
+        ax2.set_title(f"{model_name}  R2={r2:.3f}", fontsize=8)
+        if is_gpr:
+            fig2.text(0.5, -0.15, f"核: {model.kernel_}", ha="center", fontsize=5, color="gray")
+        st.pyplot(fig2)
 
     if is_gpr:
         st.subheader("测试集预测带 +/-95% 置信区间")
