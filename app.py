@@ -63,8 +63,6 @@ st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可�
 
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 cat_cols = [c for c in df.columns if c not in numeric_cols]
-if cat_cols:
-    st.info(f"检测到 {len(cat_cols)} 个非数值列（将自动做标签编码）: {', '.join(cat_cols)}")
 
 col1, col2 = st.columns(2)
 with col1:
