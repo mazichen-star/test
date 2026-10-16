@@ -58,8 +58,8 @@ if uploaded_file is None:
 
 df = load_data(uploaded_file)
 st.subheader("数据预览")
-st.dataframe(df.head(10), use_container_width=True)
-st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**")
+st.dataframe(df, use_container_width=True, height=400)
+st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可上下左右滚动查看全部）")
 
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 cat_cols = [c for c in df.columns if c not in numeric_cols]
@@ -218,7 +218,7 @@ if run_btn:
     if y_std is not None:
         result_df["预测标准差"] = y_std
     st.subheader("预测结果明细")
-    st.dataframe(result_df, use_container_width=True)
+    st.dataframe(result_df, use_container_width=True, height=300)
 
     X_all_s = scaler.transform(X)
     data_out = data.copy()
