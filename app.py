@@ -77,12 +77,6 @@ with col2:
         candidate_features, default=default_features
     )
 
-col1b, col2b = st.columns(2)
-with col1b:
-    target_name = st.text_input("目标列显示名（用于图表标题）", value=target_col)
-with col2b:
-    target_unit = st.text_input("单位（用于坐标轴，如 MPa / GPa / %）", value="")
-
 if not feature_cols:
     st.warning("请至少选择一个特征列。")
     st.stop()
@@ -206,7 +200,7 @@ if run_btn:
         ax.set_xlabel("重要性得分")
         st.pyplot(fig)
 
-    y_axis_label = f"{target_name} ({target_unit})" if target_unit else target_name
+    y_axis_label = target_col
 
     st.subheader("预测值 vs 真实值")
     fig2, ax2 = plt.subplots(figsize=(6, 6))
@@ -263,8 +257,6 @@ if run_btn:
     st.session_state["le_dict"] = le_dict
     st.session_state["feature_cols"] = feature_cols
     st.session_state["target_col"] = target_col
-    st.session_state["target_name"] = target_name
-    st.session_state["target_unit"] = target_unit
     st.session_state["is_gpr"] = is_gpr
 
     # 计算每个特征的缺失填充值（数值列用均值，类别列用众数编码值）
@@ -307,9 +299,7 @@ if "model" in st.session_state:
                         input_vals.append(fill_vals[f])
     if st.button("预测", type="secondary"):
         x_new = st.session_state["scaler"].transform(np.array(input_vals).reshape(1, -1))
-        t_name = st.session_state.get("target_name", st.session_state["target_col"])
-        t_unit = st.session_state.get("target_unit", "")
-        t_label = f"{t_name} ({t_unit})" if t_unit else t_name
+        t_label = st.session_state["target_col"]
         if st.session_state.get("is_gpr"):
             pred, std = st.session_state["model"].predict(x_new, return_std=True)
             st.success(f"预测的 **{t_label}** = **{pred[0]:.4f} +/- {1.96*std[0]:.4f}** (95% CI)")
