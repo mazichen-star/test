@@ -38,6 +38,15 @@ matplotlib.rcParams["font.sans-serif"] = [
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 st.set_page_config(page_title="力学性能预测系统", layout="wide")
+st.markdown(
+    """
+    <style>
+    .stPlot, [data-testid="stImage"] { display: flex; justify-content: center; }
+    .stPlot img, [data-testid="stImage"] img { margin: auto; }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 st.title("材料力学性能预测系统")
 st.markdown("上传 CSV / Excel 数据，训练回归模型，预测材料力学性能（抗拉强度、屈服强度、弹性模量、延伸率等）。")
 
