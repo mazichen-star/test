@@ -8,8 +8,10 @@ import numpy as np
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, ExtraTreesRegressor
 from sklearn.svm import SVR
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.neural_network import MLPRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel, ConstantKernel as C
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
@@ -75,6 +77,12 @@ with col2:
         candidate_features, default=default_features
     )
 
+col1b, col2b = st.columns(2)
+with col1b:
+    target_name = st.text_input("目标列显示名（用于图表标题）", value=target_col)
+with col2b:
+    target_unit = st.text_input("单位（用于坐标轴，如 MPa / GPa / %）", value="")
+
 if not feature_cols:
     st.warning("请至少选择一个特征列。")
     st.stop()
@@ -117,13 +125,25 @@ gpr_kernel_options = {
     "Matern 3/2": C(1.0) * Matern(length_scale=1.0, nu=1.5),
 }
 
+# 树模型/迭代模型的轮数（n_estimators），用户可调
+n_estimators = st.slider("训练轮数（树模型迭代次数，越大越拟合，过大会过拟合）",
+                          50, 1000, 300, step=50)
+
 model_options = {
     "线性回归": LinearRegression(),
     "Ridge 回归": Ridge(alpha=1.0),
     "Lasso 回归": Lasso(alpha=0.1, max_iter=5000),
-    "随机森林": RandomForestRegressor(n_estimators=200, random_state=42),
-    "梯度提升树": GradientBoostingRegressor(n_estimators=200, random_state=42),
-    "SVR 支持向量机": SVR(kernel="rbf", C=10),
+    "随机森林": RandomForestRegressor(n_estimators=n_estimators, max_depth=None,
+                                      min_samples_leaf=1, random_state=42, n_jobs=-1),
+    "梯度提升树": GradientBoostingRegressor(n_estimators=n_estimators, learning_rate=0.05,
+                                            max_depth=4, subsample=0.8, random_state=42),
+    "极端随机树": ExtraTreesRegressor(n_estimators=n_estimators, max_depth=None,
+                                       random_state=42, n_jobs=-1),
+    "SVR 支持向量机": SVR(kernel="rbf", C=10, epsilon=0.05),
+    "核岭回归 (RBF)": KernelRidge(kernel="rbf", alpha=0.1, gamma=0.1),
+    "MLP 神经网络": MLPRegressor(hidden_layer_sizes=(128, 64, 32), activation="relu",
+                                  alpha=1e-3, max_iter=2000, early_stopping=True,
+                                  learning_rate_init=0.001, random_state=42),
 }
 
 model_name = st.selectbox("选择模型", list(model_options.keys()) + ["高斯过程回归 (GPR)"])
@@ -186,12 +206,15 @@ if run_btn:
         ax.set_xlabel("重要性得分")
         st.pyplot(fig)
 
+    y_axis_label = f"{target_name} ({target_unit})" if target_unit else target_name
+
     st.subheader("预测值 vs 真实值")
     fig2, ax2 = plt.subplots(figsize=(6, 6))
     ax2.scatter(y_test, y_pred, alpha=0.7, color="#36B37E")
     lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
     ax2.plot(lims, lims, "r--", lw=2)
-    ax2.set_xlabel("真实值"); ax2.set_ylabel("预测值")
+    ax2.set_xlabel(f"真实 {y_axis_label}")
+    ax2.set_ylabel(f"预测 {y_axis_label}")
     title = f"{model_name}  (R2={r2:.3f})"
     if is_gpr:
         title += f"\n最优核: {model.kernel_}"
@@ -208,7 +231,8 @@ if run_btn:
                          y_pred[order] - 1.96 * y_std[order],
                          y_pred[order] + 1.96 * y_std[order],
                          alpha=0.3, color="#4C9AFF", label="95% 置信区间")
-        ax3.set_xlabel("样本序号"); ax3.set_ylabel(target_col)
+        ax3.set_xlabel("样本序号")
+        ax3.set_ylabel(y_axis_label)
         ax3.legend()
         st.pyplot(fig3)
 
@@ -239,6 +263,8 @@ if run_btn:
     st.session_state["le_dict"] = le_dict
     st.session_state["feature_cols"] = feature_cols
     st.session_state["target_col"] = target_col
+    st.session_state["target_name"] = target_name
+    st.session_state["target_unit"] = target_unit
     st.session_state["is_gpr"] = is_gpr
 
     # 计算每个特征的缺失填充值（数值列用均值，类别列用众数编码值）
@@ -281,11 +307,14 @@ if "model" in st.session_state:
                         input_vals.append(fill_vals[f])
     if st.button("预测", type="secondary"):
         x_new = st.session_state["scaler"].transform(np.array(input_vals).reshape(1, -1))
+        t_name = st.session_state.get("target_name", st.session_state["target_col"])
+        t_unit = st.session_state.get("target_unit", "")
+        t_label = f"{t_name} ({t_unit})" if t_unit else t_name
         if st.session_state.get("is_gpr"):
             pred, std = st.session_state["model"].predict(x_new, return_std=True)
-            st.success(f"预测的 **{st.session_state['target_col']}** = **{pred[0]:.4f} +/- {1.96*std[0]:.4f}** (95% CI)")
+            st.success(f"预测的 **{t_label}** = **{pred[0]:.4f} +/- {1.96*std[0]:.4f}** (95% CI)")
         else:
             pred = st.session_state["model"].predict(x_new)
-            st.success(f"预测的 **{st.session_state['target_col']}** = **{pred[0]:.4f}**")
+            st.success(f"预测的 **{t_label}** = **{pred[0]:.4f}**")
 else:
     st.info("请先点击「开始训练与预测」。")
