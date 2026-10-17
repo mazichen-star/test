@@ -389,9 +389,11 @@ with st.sidebar:
     except Exception:
         saved_names = []
     if saved_names:
-        chosen = st.selectbox(T["choose_saved"], ["（不加载）" if not EN else "(none)"] + saved_names)
+        none_label = "(none)" if EN else "（不加载）"
+        chosen = st.selectbox(T["choose_saved"], [none_label] + saved_names)
     else:
-        chosen = "（不加载）" if not EN else "(none)"
+        none_label = "(none)" if EN else "（不加载）"
+        chosen = none_label
         st.caption(T["no_files"])
 
 
@@ -422,10 +424,10 @@ if uploaded_file is not None:
         st.warning(f"文件保存到云端失败: {e}")
     df = load_data(uploaded_file)
     data_source = uploaded_file.name
-elif chosen != "（不加载）":
+elif chosen not in ("（不加载）", "(none)"):
     b = load_user_file(st.session_state["username"], chosen)
     if b is None:
-        st.error("读取历史文件失败")
+        st.error("读取历史文件失败" if not EN else "Failed to load saved file")
         st.stop()
     df = load_data_bytes(b, chosen)
     data_source = chosen
