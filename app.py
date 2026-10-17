@@ -196,6 +196,9 @@ st.markdown("上传 CSV / Excel 数据，训练回归模型，预测材料力学
 
 # ============ 登录 / 注册 / 找回密码 ============
 import secrets as _secrets
+import re as _re
+_USER_RE = _re.compile(r"^[a-zA-Z0-9_]{5,20}$")
+_PW_RE = _re.compile(r"^(?=.*[0-9])(?=.*[a-zA-Z])\S{8,}$")
 if "username" not in st.session_state:
     tab_login, tab_reg, tab_forgot = st.tabs(["登录", "注册", "忘记密码"])
     with tab_login:
@@ -217,6 +220,10 @@ if "username" not in st.session_state:
         if st.button("注册"):
             if not u2 or not p2:
                 st.warning("用户名和密码不能为空")
+            elif " " in u2 or not _USER_RE.match(u2):
+                st.warning("用户名须为 5-20 位数字、字母或下划线，不能含空格")
+            elif " " in p2 or not _PW_RE.match(p2):
+                st.warning("密码至少 8 位，须同时包含数字和字母，不能含空格")
             elif not email2 or "@" not in email2:
                 st.warning("请输入有效邮箱")
             elif p2 != p3:
