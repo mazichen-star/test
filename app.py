@@ -495,7 +495,7 @@ elif chosen not in ("（不加载）", "(none)"):
 
 # ============ 材料库：浏览 + 录入 ============
 with st.expander("共享材料库（用户共建，去重录入）", expanded=False):
-    tab_browse, tab_add = st.tabs(["浏览/搜索", "录入新材料"])
+    tab_browse, tab_add, tab_batch = st.tabs(["浏览/搜索", "录入新材料", "批量导入"])
     with tab_browse:
         kw = st.text_input("按化学式搜索（如 Fe、Al2O3）", value="", key="mat_kw")
         mats = list_materials(kw.strip())
@@ -550,6 +550,67 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                         st.rerun()
                     else:
                         st.error(f"录入失败: {msg}")
+
+    with tab_batch:
+        st.caption("上传 CSV / Excel，列名建议：formula, structure, tensile_strength, yield_strength, youngs_modulus, conductivity, thermal_conductivity, source。缺失列留空即可。")
+        bf = st.file_uploader("批量导入文件", type=["csv","xlsx"], key="batch_mat_file")
+        if bf is not None:
+            try:
+                if bf.name.endswith(".csv"):
+                    bdf = pd.read_csv(bf)
+                else:
+                    bdf = pd.read_excel(bf)
+            except Exception as e:
+                st.error(f"读取失败: {e}")
+                bdf = None
+            if bdf is not None:
+                st.dataframe(bdf, use_container_width=True, height=250)
+                if st.button("确认批量导入", type="primary", key="batch_import_btn"):
+                    existing = list_materials()
+                    existing_set = {m.get("formula","").strip().upper() for m in existing}
+                    rows_to_insert = []
+                    skipped = 0
+                    for _, row in bdf.iterrows():
+                        f = str(row.get("formula","")).strip()
+                        if not f or f.lower() == "nan":
+                            continue
+                        if f.upper() in existing_set:
+                            skipped += 1
+                            continue
+                        props = {}
+                        for k, pkey in [("tensile_strength","tensile_strength"),
+                                        ("yield_strength","yield_strength"),
+                                        ("youngs_modulus","youngs_modulus"),
+                                        ("conductivity","conductivity"),
+                                        ("thermal_conductivity","thermal_conductivity")]:
+                            v = row.get(k)
+                            if v is not None and not pd.isna(v):
+                                try:
+                                    props[pkey] = float(v)
+                                except Exception:
+                                    pass
+                        s = str(row.get("structure","")).strip()
+                        if s.lower() == "nan": s = ""
+                        ssrc = str(row.get("source","")).strip()
+                        if ssrc.lower() == "nan": ssrc = "批量导入"
+                        rows_to_insert.append({
+                            "formula": f,
+                            "structure": s,
+                            "properties": props,
+                            "source": ssrc,
+                            "contributor": st.session_state["username"],
+                        })
+                        existing_set.add(f.upper())
+                    if not rows_to_insert:
+                        st.warning("没有可导入的新记录（全部重复或为空）")
+                    else:
+                        r = requests.post(f"{REST}/material_library", headers=HEADERS,
+                                          json=rows_to_insert, timeout=60)
+                        if r.status_code in (200,201):
+                            st.success(f"成功导入 {len(rows_to_insert)} 条，跳过重复 {skipped} 条")
+                            st.rerun()
+                        else:
+                            st.error(f"导入失败({r.status_code}): {r.text[:300]}")
 
 if data_source is None:
     st.info("请在左侧上传数据文件，或选择已保存的文件开始使用。")
