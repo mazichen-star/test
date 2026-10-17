@@ -115,7 +115,13 @@ def load_user_file(username, filename):
     data = r.json()
     if not isinstance(data, list) or not data:
         return None
-    return base64.b64decode(data[0]["content"])
+    raw = data[0]["content"]
+    if isinstance(raw, str) and raw.startswith("\\x"):
+        return bytes.fromhex(raw[2:])
+    try:
+        return base64.b64decode(raw)
+    except Exception:
+        return None
 
 
 
