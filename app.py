@@ -13,6 +13,12 @@ from sklearn.svm import SVR
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.neural_network import MLPRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
+try:
+    from skopt import gp_minimize
+    from skopt.space import Real
+    _HAS_SKOPT = True
+except Exception:
+    _HAS_SKOPT = False
 from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel, ConstantKernel as C
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 import matplotlib.pyplot as plt
@@ -886,3 +892,101 @@ if "model" in st.session_state:
             st.success(f"预测的 **{t_label}** = **{pred[0]:.4f}**")
 else:
     st.info("请先点击「开始训练与预测」。")
+
+
+# ============ 贝叶斯优化寻优 ============
+st.divider()
+st.subheader("贝叶斯优化寻优：自动搜索最优配方")
+
+if "model" not in st.session_state:
+    st.info("请先训练模型后再使用贝叶斯优化。")
+elif not _HAS_SKOPT:
+    st.warning("未安装 scikit-optimize，无法使用贝叶斯优化。请在 requirements.txt 中添加后重新部署。")
+else:
+    fcols = st.session_state["feature_cols"]
+    led = st.session_state["le_dict"]
+    numeric_features = [f for f in fcols if f not in led]
+    if not numeric_features:
+        st.info("没有数值特征可优化（全是类别特征）。")
+    else:
+        scaler = st.session_state["scaler"]
+        model = st.session_state["model"]
+        is_gpr = st.session_state.get("is_gpr")
+        # 用训练数据统计范围
+        mins = {}
+        maxs = {}
+        for f in numeric_features:
+            col_idx = fcols.index(f)
+            orig = scaler.inverse_transform(np.zeros((1, len(fcols))))[0]  # 均值
+            # 用 X 反推范围；这里简化为：取训练集时没存，用 scaler.mean_ 和 scale_ 估
+            mean = scaler.mean_[col_idx]
+            std = scaler.scale_[col_idx]
+            mins[f] = float(mean - 2*std)
+            maxs[f] = float(mean + 2*std)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            direction = st.radio("优化目标", ["最大化", "最小化"], horizontal=True)
+        with c2:
+            n_iter = st.number_input("迭代次数", min_value=10, max_value=100, value=30, step=5)
+        with c3:
+            top_k = st.number_input("输出前几个候选", min_value=5, max_value=20, value=10)
+
+        with st.expander("调整各特征搜索范围（默认训练数据均值±2σ）"):
+            bounds = {}
+            bcols = st.columns(2)
+            for i, f in enumerate(numeric_features):
+                with bcols[i % 2]:
+                    lo = st.number_input(f"{f} 下限", value=mins[f], format="%.4g", key=f"bo_lo_{f}")
+                    hi = st.number_input(f"{f} 上限", value=maxs[f], format="%.4g", key=f"bo_hi_{f}")
+                    bounds[f] = (lo, hi)
+
+        if st.button("开始寻优", type="primary", key="bo_run"):
+            target_col = st.session_state["target_col"]
+            direction_sign = -1.0 if direction == "最大化" else 1.0
+
+            def objective(x):
+                full = [0.0]*len(fcols)
+                for i, f in enumerate(numeric_features):
+                    full[fcols.index(f)] = x[i]
+                for f in fcols:
+                    if f in led:
+                        full[fcols.index(f)] = st.session_state["fill_values"][f]
+                xs = scaler.transform(np.array(full).reshape(1, -1))
+                if is_gpr:
+                    p = model.predict(xs, return_std=False)
+                else:
+                    p = model.predict(xs)
+                return direction_sign * float(p[0])
+
+            space = [Real(bounds[f][0], bounds[f][1], name=f) for f in numeric_features]
+            with st.spinner(f"贝叶斯优化迭代 {int(n_iter)} 次中..."):
+                res = gp_minimize(objective, space, n_calls=int(n_iter), random_state=42, n_initial_points=5)
+
+            # 收集所有评估点
+            trials = []
+            for x, fun in zip(res.x_iters, res.func_vals):
+                rec = {f: x[i] for i, f in enumerate(numeric_features)}
+                rec[target_col] = fun * direction_sign
+                trials.append(rec)
+            trials.sort(key=lambda r: r[target_col], reverse=(direction == "最大化"))
+
+            st.success(f"寻优完成，最优 {target_col} = {trials[0][target_col]:.4f}")
+            st.dataframe(trials[:int(top_k)], use_container_width=True, height=350)
+
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(8, 4))
+            best_so_far = []
+            cur = trials[0][target_col]
+            for t in trials:
+                if direction == "最大化":
+                    cur = max(cur, t[target_col])
+                else:
+                    cur = min(cur, t[target_col])
+                best_so_far.append(cur)
+            ax.plot(range(1, len(best_so_far)+1), best_so_far, marker="o")
+            ax.set_xlabel("Iteration")
+            ax.set_ylabel(f"Best {target_col}")
+            ax.set_title("Convergence")
+            st.pyplot(fig)
+
