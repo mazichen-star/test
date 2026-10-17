@@ -42,37 +42,53 @@ def hash_pw(pw):
 
 def user_exists(username):
     r = requests.get(f"{REST}/users?username=eq.{username}&select=username", headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        st.error(f"数据库错误({r.status_code}): {r.text[:200]}")
+        return False
     return len(r.json()) > 0
 
 
 def add_user(username, pw):
-    requests.post(f"{REST}/users", headers=HEADERS,
-                  json={"username": username, "password_hash": hash_pw(pw)}, timeout=15)
+    r = requests.post(f"{REST}/users", headers=HEADERS,
+                      json={"username": username, "password_hash": hash_pw(pw)}, timeout=15)
+    if r.status_code not in (200, 201):
+        st.error(f"注册失败({r.status_code}): {r.text[:200]}")
 
 
 def verify_user(username, pw):
     r = requests.get(f"{REST}/users?username=eq.{username}&select=password_hash", headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        st.error(f"登录失败，数据库错误({r.status_code}): {r.text[:200]}")
+        return False
     data = r.json()
-    return bool(data) and data[0]["password_hash"] == hash_pw(pw)
+    if not isinstance(data, list) or not data:
+        return False
+    return data[0].get("password_hash") == hash_pw(pw)
 
 
 def list_user_files(username):
     r = requests.get(f"{REST}/user_files?username=eq.{username}&select=id,filename,uploaded_at&order=uploaded_at.desc",
                      headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        return []
     return r.json()
 
 
 def save_user_file(username, filename, content_bytes):
     b64 = base64.b64encode(content_bytes).decode("ascii")
-    requests.post(f"{REST}/user_files", headers=HEADERS,
-                  json={"username": username, "filename": filename, "content": b64}, timeout=30)
+    r = requests.post(f"{REST}/user_files", headers=HEADERS,
+                      json={"username": username, "filename": filename, "content": b64}, timeout=30)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"{r.status_code}: {r.text[:200]}")
 
 
 def load_user_file(username, filename):
     r = requests.get(f"{REST}/user_files?username=eq.{username}&filename=eq.{filename}&select=content",
                      headers=HEADERS, timeout=30)
+    if r.status_code != 200:
+        return None
     data = r.json()
-    if not data:
+    if not isinstance(data, list) or not data:
         return None
     return base64.b64decode(data[0]["content"])
 
