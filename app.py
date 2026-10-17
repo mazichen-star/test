@@ -130,6 +130,27 @@ dark_css = """
 [data-testid="stSidebar"] { background-color: #1a1d24; }
 .stDataFrame, table { color: #e6e6e6; }
 h1, h2, h3, h4, p, label, span, div { color: #e6e6e6 !important; }
+input, textarea {
+    background-color: #262932 !important;
+    color: #e6e6e6 !important;
+    border-color: #4a4d55 !important;
+}
+[data-baseweb="select"] > div {
+    background-color: #262932 !important;
+    color: #e6e6e6 !important;
+    border-color: #4a4d55 !important;
+}
+[data-baseweb="popover"] {
+    background-color: #262932 !important;
+    color: #e6e6e6 !important;
+}
+.stButton > button {
+    background-color: #262932;
+    color: #e6e6e6;
+    border-color: #4a4d55;
+}
+.stSlider > div { background-color: #262932; }
+hr { border-color: #4a4d55; }
 </style>
 """
 
