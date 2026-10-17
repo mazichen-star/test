@@ -151,6 +151,15 @@ input, textarea {
 }
 .stSlider > div { background-color: #262932; }
 hr { border-color: #4a4d55; }
+[data-testid="stFileUploaderDropzone"] {
+    background-color: #262932 !important;
+    border-color: #4a4d55 !important;
+}
+[data-testid="stFileUploaderDropzone"] * { color: #e6e6e6 !important; }
+[data-testid="stFileUploaderDropzone"] button {
+    background-color: #3a3d45;
+    color: #e6e6e6;
+}
 </style>
 """
 
