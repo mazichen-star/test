@@ -236,6 +236,7 @@ if "username" not in st.session_state:
                 st.warning("请输入用户名和密码")
             elif verify_user(u, p):
                 st.session_state["username"] = u
+                st.session_state["show_pw_reminder"] = True
                 st.rerun()
             else:
                 st.error("用户名或密码错误")
@@ -283,6 +284,13 @@ if "username" not in st.session_state:
     st.stop()
 
 # 已登录
+if st.session_state.get("show_pw_reminder"):
+    st.warning("首次登录（或通过找回密码登录）后，请尽快在左侧「账号设置」中修改为自己的密码。",
+               icon="🔑")
+    if st.button("我知道了，关闭提示"):
+        st.session_state["show_pw_reminder"] = False
+        st.rerun()
+
 with st.sidebar:
     st.caption(f"当前用户: **{st.session_state['username']}**")
     if st.button("退出登录"):
