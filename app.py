@@ -20,6 +20,68 @@ import matplotlib
 from matplotlib import font_manager
 import os
 import io
+import sqlite3
+import hashlib
+from datetime import datetime
+
+# ============ 用户数据目录 ============
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+USER_DIR = os.path.join(DATA_DIR, "users")
+os.makedirs(USER_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "users.db")
+
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )""")
+    conn.commit()
+    conn.close()
+
+
+def hash_pw(pw):
+    return hashlib.sha256(pw.encode("utf-8")).hexdigest()
+
+
+def user_exists(username):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM users WHERE username=?", (username,))
+    r = c.fetchone()
+    conn.close()
+    return r is not None
+
+
+def add_user(username, pw):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT INTO users VALUES (?,?,?)",
+              (username, hash_pw(pw), datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    conn.close()
+
+
+def verify_user(username, pw):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT password_hash FROM users WHERE username=?", (username,))
+    r = c.fetchone()
+    conn.close()
+    return r is not None and r[0] == hash_pw(pw)
+
+
+def user_dir(username):
+    d = os.path.join(USER_DIR, username)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+init_db()
 
 # 解决 matplotlib 中文显示方块问题
 # 优先加载仓库自带的开源中文字体（Noto Sans SC），兼容 Windows / Linux / Streamlit Cloud
@@ -50,9 +112,57 @@ st.markdown(
 st.title("材料力学性能预测系统")
 st.markdown("上传 CSV / Excel 数据，训练回归模型，预测材料力学性能（抗拉强度、屈服强度、弹性模量、延伸率等）。")
 
+# ============ 登录 / 注册 ============
+if "username" not in st.session_state:
+    tab_login, tab_reg = st.tabs(["登录", "注册"])
+    with tab_login:
+        u = st.text_input("用户名", key="login_u")
+        p = st.text_input("密码", type="password", key="login_p")
+        if st.button("登录", type="primary"):
+            if not u or not p:
+                st.warning("请输入用户名和密码")
+            elif verify_user(u, p):
+                st.session_state["username"] = u
+                st.rerun()
+            else:
+                st.error("用户名或密码错误")
+    with tab_reg:
+        u2 = st.text_input("设置用户名", key="reg_u")
+        p2 = st.text_input("设置密码", type="password", key="reg_p")
+        p3 = st.text_input("确认密码", type="password", key="reg_p3")
+        if st.button("注册"):
+            if not u2 or not p2:
+                st.warning("用户名和密码不能为空")
+            elif p2 != p3:
+                st.warning("两次密码不一致")
+            elif user_exists(u2):
+                st.warning("该用户名已存在")
+            else:
+                add_user(u2, p2)
+                user_dir(u2)
+                st.success("注册成功，请登录")
+    st.stop()
+
+# 已登录
 with st.sidebar:
+    st.caption(f"当前用户: **{st.session_state['username']}**")
+    if st.button("退出登录"):
+        del st.session_state["username"]
+        st.rerun()
+    st.divider()
+
     st.header("配置")
     uploaded_file = st.file_uploader("上传数据文件", type=["csv", "xlsx", "xls"])
+
+    # 历史文件
+    st.subheader("我的数据文件")
+    udir = user_dir(st.session_state["username"])
+    saved_files = [f for f in os.listdir(udir) if f.endswith((".csv", ".xlsx", ".xls"))]
+    if saved_files:
+        chosen = st.selectbox("选择已保存的文件", ["（不加载）"] + sorted(saved_files))
+    else:
+        chosen = "（不加载）"
+        st.caption("暂无历史文件")
 
 
 @st.cache_data
@@ -63,11 +173,32 @@ def load_data(file):
         return pd.read_excel(file)
 
 
-if uploaded_file is None:
-    st.info("请在左侧上传数据文件开始使用。")
+@st.cache_data
+def load_data_path(path):
+    if path.endswith(".csv"):
+        return pd.read_csv(path)
+    else:
+        return pd.read_excel(path)
+
+
+# 确定数据源：优先新上传，其次历史文件
+data_source = None
+if uploaded_file is not None:
+    # 保存到用户目录
+    save_path = os.path.join(user_dir(st.session_state["username"]), uploaded_file.name)
+    with open(save_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    df = load_data(uploaded_file)
+    data_source = uploaded_file.name
+elif chosen != "（不加载）":
+    df = load_data_path(os.path.join(udir, chosen))
+    data_source = chosen
+
+if data_source is None:
+    st.info("请在左侧上传数据文件，或选择已保存的文件开始使用。")
     st.stop()
 
-df = load_data(uploaded_file)
+st.caption(f"当前数据文件: **{data_source}**")
 st.subheader("数据预览")
 st.dataframe(df, use_container_width=True, height=400)
 st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可上下左右滚动查看全部）")

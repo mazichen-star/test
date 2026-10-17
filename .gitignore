@@ -3,8 +3,6 @@ __pycache__/
 .venv/
 venv/
 .env
-*.xlsx
-*.csv
-!data_sample/*.csv
+data/
 .streamlit/
 .DS_Store
