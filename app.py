@@ -112,6 +112,34 @@ def load_user_file(username, filename):
     return base64.b64decode(data[0]["content"])
 
 
+
+
+# ============ 共享材料库 ============
+def list_materials(keyword=""):
+    url = f"{REST}/material_library?select=id,formula,structure,properties,source,contributor,created_at&order=created_at.desc"
+    if keyword:
+        url += "&formula=ilike.*" + keyword + "*"
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        return []
+    return r.json()
+
+def find_material(formula):
+    f = formula.strip().upper()
+    r = requests.get(f"{REST}/material_library?select=id,formula,structure", headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        return None
+    for m in r.json():
+        if m.get("formula","").strip().upper() == f:
+            return m
+    return None
+
+def add_material(formula, structure, properties, source, contributor):
+    payload = {"formula": formula.strip(), "structure": structure.strip(),
+               "properties": properties, "source": source.strip(), "contributor": contributor}
+    r = requests.post(f"{REST}/material_library", headers=HEADERS, json=payload, timeout=15)
+    return r.status_code in (200,201), r.text[:300]
+
 def change_password(username, new_pw):
     requests.patch(f"{REST}/users?username=eq.{username}", headers=HEADERS,
                    json={"password_hash": hash_pw(new_pw)}, timeout=15)
@@ -436,6 +464,66 @@ elif chosen not in ("（不加载）", "(none)"):
         st.stop()
     df = load_data_bytes(b, chosen)
     data_source = chosen
+
+
+
+# ============ 材料库：浏览 + 录入 ============
+with st.expander("📚 共享材料库（用户共建，去重录入）", expanded=False):
+    tab_browse, tab_add = st.tabs(["浏览/搜索", "录入新材料"])
+    with tab_browse:
+        kw = st.text_input("按化学式搜索（如 Fe、Al2O3）", value="", key="mat_kw")
+        mats = list_materials(kw.strip())
+        if not mats:
+            st.info("库中暂无材料，去录入页添加第一条")
+        else:
+            rows = []
+            for m in mats:
+                p = m.get("properties") or {}
+                rows.append({
+                    "ID": m.get("id"),
+                    "化学式/成分": m.get("formula"),
+                    "结构": m.get("structure"),
+                    "抗拉强度(MPa)": p.get("tensile_strength"),
+                    "屈服强度(MPa)": p.get("yield_strength"),
+                    "杨氏模量(GPa)": p.get("youngs_modulus"),
+                    "电导率(S/m)": p.get("conductivity"),
+                    "热导率(W/mK)": p.get("thermal_conductivity"),
+                    "数据来源": m.get("source"),
+                    "录入者": m.get("contributor"),
+                })
+            st.dataframe(rows, use_container_width=True, height=300)
+    with tab_add:
+        c1, c2 = st.columns(2)
+        with c1:
+            f_new = st.text_input("化学式/成分（如 Fe-0.2C、Al2O3、PLA）", key="mat_formula")
+            s_new = st.text_input("结构描述（如 奥氏体FCC、马氏体、非晶）", key="mat_struct")
+            src_new = st.selectbox("数据来源", ["实验测量", "文献报道", "手册数据", "估算/预测"], key="mat_source")
+        with c2:
+            ts = st.number_input("抗拉强度 MPa（可选）", value=0.0, step=10.0, key="mat_ts")
+            ys = st.number_input("屈服强度 MPa（可选）", value=0.0, step=10.0, key="mat_ys")
+            ym = st.number_input("杨氏模量 GPa（可选）", value=0.0, step=1.0, key="mat_ym")
+            ec = st.number_input("电导率 S/m（可选）", value=0.0, step=1e6, format="%.2e", key="mat_ec")
+            tc = st.number_input("热导率 W/(m·K)（可选）", value=0.0, step=1.0, key="mat_tc")
+        if st.button("提交录入", type="primary", key="mat_submit"):
+            if not f_new.strip():
+                st.warning("请填写化学式/成分")
+            else:
+                dup = find_material(f_new)
+                if dup:
+                    st.warning(f"该材料已在库中（ID={dup['id']}，结构：{dup.get('structure','')}），不重复录入")
+                else:
+                    props = {}
+                    if ts: props["tensile_strength"] = ts
+                    if ys: props["yield_strength"] = ys
+                    if ym: props["youngs_modulus"] = ym
+                    if ec: props["conductivity"] = ec
+                    if tc: props["thermal_conductivity"] = tc
+                    ok, msg = add_material(f_new, s_new, props, src_new, st.session_state["username"])
+                    if ok:
+                        st.success("录入成功，已加入共享材料库")
+                        st.rerun()
+                    else:
+                        st.error(f"录入失败: {msg}")
 
 if data_source is None:
     st.info("请在左侧上传数据文件，或选择已保存的文件开始使用。")
