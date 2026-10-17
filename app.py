@@ -564,35 +564,53 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                 st.error(f"读取失败: {e}")
                 bdf = None
             if bdf is not None:
-                st.dataframe(bdf, use_container_width=True, height=250)
-                if st.button("确认批量导入", type="primary", key="batch_import_btn"):
-                    existing = list_materials()
-                    existing_set = {m.get("formula","").strip().upper() for m in existing}
-                    rows_to_insert = []
-                    skipped = 0
-                    for _, row in bdf.iterrows():
-                        f = str(row.get("formula","")).strip()
-                        if not f or f.lower() == "nan":
-                            continue
-                        if f.upper() in existing_set:
-                            skipped += 1
-                            continue
-                        props = {}
-                        for k, pkey in [("tensile_strength","tensile_strength"),
-                                        ("yield_strength","yield_strength"),
-                                        ("youngs_modulus","youngs_modulus"),
-                                        ("conductivity","conductivity"),
-                                        ("thermal_conductivity","thermal_conductivity")]:
-                            v = row.get(k)
-                            if v is not None and not pd.isna(v):
-                                try:
-                                    props[pkey] = float(v)
-                                except Exception:
-                                    pass
-                        s = str(row.get("structure","")).strip()
-                        if s.lower() == "nan": s = ""
-                        ssrc = str(row.get("source","")).strip()
-                        if ssrc.lower() == "nan": ssrc = "批量导入"
+                # 智能列名识别：把常见别名映射到标准列名
+                COL_ALIAS = {
+                    "formula": ["formula", "chemical_formula", "compound", "material", "化学式", "成分", "材料", "材料名称", "成分体系", "牌号"],
+                    "structure": ["structure", "microstructure", "phase", "结构", "显微组织", "物相", "组织"],
+                    "tensile_strength": ["tensile_strength", "uts", "tensile", "抗拉强度", "拉伸强度", "抗拉"],
+                    "yield_strength": ["yield_strength", "ys", "yield", "屈服强度", "屈服"],
+                    "youngs_modulus": ["youngs_modulus", "young_modulus", "elastic_modulus", "e_modulus", "杨氏模量", "弹性模量", "模量"],
+                    "conductivity": ["conductivity", "electrical_conductivity", "电导率", "导电率"],
+                    "thermal_conductivity": ["thermal_conductivity", "tc", "热导率", "导热系数"],
+                    "source": ["source", "data_source", "来源", "数据来源", "文献"],
+                }
+                norm = {}
+                for std, aliases in COL_ALIAS.items():
+                    for a in aliases:
+                        if a in bdf.columns:
+                            norm[std] = a
+                            break
+                st.caption(f"识别到列：{norm}")
+                if "formula" not in norm:
+                    st.error("找不到材料名列（支持 formula/化学式/成分/材料 等），请检查 CSV 列名")
+                else:
+                    st.dataframe(bdf, use_container_width=True, height=250)
+                    if st.button("确认批量导入", type="primary", key="batch_import_btn"):
+                        existing = list_materials()
+                        existing_set = {m.get("formula","").strip().upper() for m in existing}
+                        rows_to_insert = []
+                        skipped = 0
+                        for _, row in bdf.iterrows():
+                            f = str(row.get(norm["formula"],"")).strip()
+                            if not f or f.lower() == "nan":
+                                continue
+                            if f.upper() in existing_set:
+                                skipped += 1
+                                continue
+                            props = {}
+                            for pkey in ["tensile_strength","yield_strength","youngs_modulus","conductivity","thermal_conductivity"]:
+                                if pkey in norm:
+                                    v = row.get(norm[pkey])
+                                    if v is not None and not pd.isna(v):
+                                        try:
+                                            props[pkey] = float(v)
+                                        except Exception:
+                                            pass
+                            s = str(row.get(norm.get("structure",""),"")).strip()
+                            if s.lower() == "nan": s = ""
+                            ssrc = str(row.get(norm.get("source",""),"")).strip()
+                            if ssrc.lower() == "nan": ssrc = "批量导入"
                         rows_to_insert.append({
                             "formula": f,
                             "structure": s,
