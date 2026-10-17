@@ -380,7 +380,7 @@ if "username" not in st.session_state:
             elif p2 != p3:
                 st.warning("两次密码不一致" if not EN else "Passwords do not match")
             elif user_exists(u2):
-                st.warning("该用户名已存在" if not EN else "Username already exists")
+                st.warning("该用户名已被注册，请换一个" if not EN else "Username already registered, please choose another")
             else:
                 add_user(u2, p2, email2)
                 st.success("注册成功，请登录" if not EN else "Registered, please log in.")
