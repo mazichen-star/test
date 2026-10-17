@@ -111,28 +111,3 @@ streamlit run app.py
 ```
 
 启动后浏览器会自动打开本地页面。首次使用需先注册账号，登录后在左侧上传数据文件。
-
-### 数据格式
-
-每一行代表一个样本，每一列代表一个输入参数（化学成分、加工工艺参数等）或一个待预测的力学性能值。在页面中手动指定哪一列是"目标列"（要预测的性能），其余勾选为"特征列"（输入参数）即可。
-
-### 可选的密钥配置
-
-在本地新建 `.streamlit/secrets.toml` 可覆盖默认配置（该目录已被 git 忽略，不会提交）：
-
-```toml
-SUPABASE_URL = "https://your-project.supabase.co"
-SUPABASE_KEY = "your-anon-key"
-SMTP_HOST = "smtp.example.com"
-SMTP_PORT = "465"
-SMTP_USER = "your-mail@example.com"
-SMTP_PASSWORD = "your-smtp-password"
-```
-
-## 7. 部署
-
-将本目录推送到 GitHub 后，在 Streamlit Community Cloud 中选择该仓库、主文件设为 `app.py`，并在平台的 Secrets 中填入上述密钥，即可免费在线部署。
-
-## 8. 许可证
-
-本项目基于 Apache License 2.0 开源，详见 `LICENSE`。
