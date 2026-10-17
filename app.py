@@ -213,13 +213,79 @@ light_css = """
 </style>
 """
 
-st.session_state["dark_mode"] = st.sidebar.toggle("暗色模式", value=st.session_state["dark_mode"], key="dark_toggle")
+# ============ 多语言 ============
+LANGS = ["中文", "English"]
+if "ui_lang" not in st.session_state:
+    st.session_state["ui_lang"] = "中文"
+st.session_state["ui_lang"] = st.sidebar.selectbox("Language / 语言", LANGS,
+                                                  index=LANGS.index(st.session_state["ui_lang"]),
+                                                  key="lang_select")
+EN = st.session_state["ui_lang"] == "English"
+T = {
+    "app_title": "Mechanical Property Prediction" if EN else "材料力学性能预测系统",
+    "app_desc": ("Upload CSV/Excel, train regression models to predict mechanical properties "
+                 "(tensile strength, yield strength, Young's modulus, elongation, etc.).")
+                if EN else "上传 CSV / Excel 数据，训练回归模型，预测材料力学性能（抗拉强度、屈服强度、弹性模量、延伸率等）。",
+    "dark": "Dark mode" if EN else "暗色模式",
+    "login": "Login" if EN else "登录",
+    "register": "Register" if EN else "注册",
+    "forgot": "Forgot password" if EN else "忘记密码",
+    "username": "Username" if EN else "用户名",
+    "password": "Password" if EN else "密码",
+    "login_btn": "Login" if EN else "登录",
+    "reg_u_rule": ("Username: 5-20 chars, letters/digits/underscore only, no spaces.")
+                  if EN else "用户名：5-20 位，只能用数字、字母、下划线，不能含空格",
+    "reg_email": "Bound email (for password recovery)" if EN else "绑定邮箱（用于找回密码）",
+    "reg_p_rule": "Password: at least 8 chars, must contain digits and letters, no spaces." if EN else "密码：至少 8 位，须同时包含数字和字母，不能含空格",
+    "set_pw": "Set password" if EN else "设置密码",
+    "confirm_pw": "Confirm password" if EN else "确认密码",
+    "reg_btn": "Register" if EN else "注册",
+    "forgot_caption": "Enter your bound email to get a temporary password." if EN else "输入注册时绑定的邮箱，系统会生成临时密码。",
+    "bound_email": "Bound email" if EN else "绑定邮箱",
+    "recover_btn": "Recover" if EN else "找回密码",
+    "upload": "Upload data file" if EN else "上传数据文件",
+    "my_files": "My data files" if EN else "我的数据文件",
+    "choose_saved": "Choose a saved file" if EN else "选择已保存的文件",
+    "no_files": "No files yet" if EN else "暂无历史文件",
+    "logout": "Log out" if EN else "退出登录",
+    "account_settings": "Account settings" if EN else "账号设置",
+    "new_pw": "New password" if EN else "新密码",
+    "confirm_new_pw": "Confirm new password" if EN else "确认新密码",
+    "change_pw": "Change password" if EN else "修改密码",
+    "delete_acc": "Delete account" if EN else "删除账号",
+    "data_preview": "Data preview" if EN else "数据预览",
+    "target_col": "Target column (property to predict)" if EN else "目标列（要预测的力学性能）",
+    "feature_cols": "Feature columns (inputs)" if EN else "特征列（输入参数）",
+    "model_settings": "Model settings" if EN else "模型设置",
+    "n_est": "Training rounds (n_estimators)" if EN else "训练轮数",
+    "test_size": "Test set ratio" if EN else "测试集比例",
+    "train_btn": "Train & predict" if EN else "开始训练与预测",
+    "compare_mode": "Compare multiple models (auto-pick best)" if EN else "多模型对比（自动选最优）",
+    "compare_models": "Select models to compare" if EN else "选择要对比的模型",
+    "model_compare_result": "Model comparison" if EN else "模型对比结果",
+    "best_model": "Best model" if EN else "最优模型",
+    "metrics": "Metrics" if EN else "指标",
+    "feature_imp": "Feature importance" if EN else "特征重要性",
+    "pred_vs_true": "Predicted vs True" if EN else "预测值 vs 真实值",
+    "fit_curves": "Feature fit curves (others fixed at mean)" if EN else "特征拟合曲线（其他特征固定为均值）",
+    "pred_detail": "Prediction details" if EN else "预测结果明细",
+    "download": "Download Excel with predictions" if EN else "下载含预测列的 Excel",
+    "predict_new": "Predict a new sample" if EN else "用训练好的模型预测新样本",
+    "fill_hint": "Leave blank to use training mean" if EN else "留空则用训练集均值填充",
+    "predict_btn": "Predict" if EN else "预测",
+    "need_train": "Please train first." if EN else "请先点击「开始训练与预测」。",
+    "pw_reminder": ("First login (or password recovery), please change your password in Account settings.")
+                   if EN else "首次登录（或通过找回密码登录）后，请尽快在左侧「账号设置」中修改为自己的密码。",
+    "dismiss": "Dismiss" if EN else "我知道了，关闭提示",
+}
+
+st.session_state["dark_mode"] = st.sidebar.toggle(T["dark"], value=st.session_state["dark_mode"], key="dark_toggle")
 if st.session_state["dark_mode"]:
     st.markdown(dark_css + light_css, unsafe_allow_html=True)
 else:
     st.markdown(light_css, unsafe_allow_html=True)
-st.title("材料力学性能预测系统")
-st.markdown("上传 CSV / Excel 数据，训练回归模型，预测材料力学性能（抗拉强度、屈服强度、弹性模量、延伸率等）。")
+st.title(T["app_title"])
+st.markdown(T["app_desc"])
 
 # ============ 登录 / 注册 / 找回密码 ============
 import secrets as _secrets
@@ -227,110 +293,106 @@ import re as _re
 _USER_RE = _re.compile(r"^[a-zA-Z0-9_]{5,20}$")
 _PW_RE = _re.compile(r"^(?=.*[0-9])(?=.*[a-zA-Z])\S{8,}$")
 if "username" not in st.session_state:
-    tab_login, tab_reg, tab_forgot = st.tabs(["登录", "注册", "忘记密码"])
+    tab_login, tab_reg, tab_forgot = st.tabs([T["login"], T["register"], T["forgot"]])
     with tab_login:
-        u = st.text_input("用户名", key="login_u")
-        p = st.text_input("密码", type="password", key="login_p")
-        if st.button("登录", type="primary"):
+        u = st.text_input(T["username"], key="login_u")
+        p = st.text_input(T["password"], type="password", key="login_p")
+        if st.button(T["login_btn"], type="primary"):
             if not u or not p:
-                st.warning("请输入用户名和密码")
+                st.warning("请输入用户名和密码" if not EN else "Please enter username and password")
             elif verify_user(u, p):
                 st.session_state["username"] = u
                 st.session_state["show_pw_reminder"] = True
                 st.rerun()
             else:
-                st.error("用户名或密码错误")
+                st.error("用户名或密码错误" if not EN else "Wrong username or password")
     with tab_reg:
-        st.caption("用户名：5-20 位，只能用数字、字母、下划线，不能含空格")
-        u2 = st.text_input("设置用户名", key="reg_u")
-        email2 = st.text_input("绑定邮箱（用于找回密码）", key="reg_email")
-        st.caption("密码：至少 8 位，须同时包含数字和字母，不能含空格")
-        p2 = st.text_input("设置密码", type="password", key="reg_p")
-        p3 = st.text_input("确认密码", type="password", key="reg_p3")
-        if st.button("注册"):
+        st.caption(T["reg_u_rule"])
+        u2 = st.text_input(T["username"], key="reg_u")
+        email2 = st.text_input(T["reg_email"], key="reg_email")
+        st.caption(T["reg_p_rule"])
+        p2 = st.text_input(T["set_pw"], type="password", key="reg_p")
+        p3 = st.text_input(T["confirm_pw"], type="password", key="reg_p3")
+        if st.button(T["reg_btn"]):
             if not u2 or not p2:
-                st.warning("用户名和密码不能为空")
+                st.warning("用户名和密码不能为空" if not EN else "Username and password cannot be empty")
             elif " " in u2 or not _USER_RE.match(u2):
-                st.warning("用户名须为 5-20 位数字、字母或下划线，不能含空格")
+                st.warning(T["reg_u_rule"])
             elif " " in p2 or not _PW_RE.match(p2):
-                st.warning("密码至少 8 位，须同时包含数字和字母，不能含空格")
+                st.warning(T["reg_p_rule"])
             elif not email2 or "@" not in email2:
-                st.warning("请输入有效邮箱")
+                st.warning("请输入有效邮箱" if not EN else "Please enter a valid email")
             elif p2 != p3:
-                st.warning("两次密码不一致")
+                st.warning("两次密码不一致" if not EN else "Passwords do not match")
             elif user_exists(u2):
-                st.warning("该用户名已存在")
+                st.warning("该用户名已存在" if not EN else "Username already exists")
             else:
                 add_user(u2, p2, email2)
-                st.success("注册成功，请登录")
+                st.success("注册成功，请登录" if not EN else "Registered, please log in.")
     with tab_forgot:
-        st.caption("输入注册时绑定的邮箱，系统会生成临时密码。")
-        email_f = st.text_input("绑定邮箱", key="forgot_email")
-        if st.button("找回密码"):
+        st.caption(T["forgot_caption"])
+        email_f = st.text_input(T["bound_email"], key="forgot_email")
+        if st.button(T["recover_btn"]):
             if not email_f:
-                st.warning("请输入邮箱")
+                st.warning("请输入邮箱" if not EN else "Please enter email")
             else:
                 rec = find_user_by_email(email_f)
                 if rec is None:
-                    st.error("该邮箱未绑定任何账号")
+                    st.error("该邮箱未绑定任何账号" if not EN else "No account bound to this email")
                 else:
                     tmp_pw = _secrets.token_urlsafe(8)
                     change_password(rec["username"], tmp_pw)
-                    body = (f"您好，\n\n您的账号 {rec['username']} 的临时密码为：{tmp_pw}\n\n"
-                            f"请尽快登录并在「账号设置」中修改密码。\n\n此邮件由系统自动发送，请勿回复。")
-                    ok, msg = send_email(email_f, "力学预测系统 - 找回密码", body)
+                    body = (f"Hello,\n\nYour temporary password for {rec['username']} is: {tmp_pw}\n\n"
+                            f"Please log in and change it in Account settings.\n\nDo not reply.")
+                    ok, msg = send_email(email_f, "Mechanical Prediction - Password Recovery", body)
                     if ok:
-                        st.success(f"临时密码已发送到 {email_f}，请查收邮件（含垃圾邮件箱）。")
+                        st.success(f"Temporary password sent to {email_f}." if EN else f"临时密码已发送到 {email_f}")
                     else:
-                        st.warning(f"邮件发送失败（{msg}），临时密码: `{tmp_pw}`")
+                        st.warning(f"邮件发送失败（{msg}），临时密码: `{tmp_pw}`" if not EN else f"Email failed ({msg}), temp password: `{tmp_pw}`")
     st.stop()
 
 # 已登录
 if st.session_state.get("show_pw_reminder"):
-    st.warning("首次登录（或通过找回密码登录）后，请尽快在左侧「账号设置」中修改为自己的密码。",
-               icon="🔑")
-    if st.button("我知道了，关闭提示"):
+    st.warning(T["pw_reminder"], icon="🔑")
+    if st.button(T["dismiss"]):
         st.session_state["show_pw_reminder"] = False
         st.rerun()
 
 with st.sidebar:
-    st.caption(f"当前用户: **{st.session_state['username']}**")
-    if st.button("退出登录"):
+    st.caption(f"当前用户: **{st.session_state['username']}**" if not EN else f"User: **{st.session_state['username']}**")
+    if st.button(T["logout"]):
         del st.session_state["username"]
         st.rerun()
-    with st.expander("账号设置"):
-        new_pw = st.text_input("新密码", type="password", key="new_pw")
-        confirm_pw = st.text_input("确认新密码", type="password", key="confirm_pw")
-        if st.button("修改密码"):
+    with st.expander(T["account_settings"]):
+        new_pw = st.text_input(T["new_pw"], type="password", key="new_pw")
+        confirm_pw = st.text_input(T["confirm_new_pw"], type="password", key="confirm_pw")
+        if st.button(T["change_pw"]):
             if not new_pw or new_pw != confirm_pw:
-                st.warning("两次新密码不一致")
+                st.warning("两次新密码不一致" if not EN else "Passwords do not match")
             else:
                 change_password(st.session_state["username"], new_pw)
-                st.success("密码已修改")
+                st.success("密码已修改" if not EN else "Password changed")
         st.divider()
-        if st.button("删除账号", type="secondary"):
+        if st.button(T["delete_acc"], type="secondary"):
             delete_account(st.session_state["username"])
-            st.success("账号已删除")
             del st.session_state["username"]
             st.rerun()
     st.divider()
 
-    st.header("配置")
-    uploaded_file = st.file_uploader("上传数据文件", type=["csv", "xlsx", "xls"])
+    st.header(T["model_settings"])
+    uploaded_file = st.file_uploader(T["upload"], type=["csv", "xlsx", "xls"])
 
-    # 历史文件（从 Supabase 拉取）
-    st.subheader("我的数据文件")
+    st.subheader(T["my_files"])
     try:
         saved = list_user_files(st.session_state["username"])
         saved_names = [f["filename"] for f in saved]
-    except Exception as e:
+    except Exception:
         saved_names = []
-        st.caption(f"无法加载历史文件列表")
     if saved_names:
-        chosen = st.selectbox("选择已保存的文件", ["（不加载）"] + saved_names)
+        chosen = st.selectbox(T["choose_saved"], ["（不加载）" if not EN else "(none)"] + saved_names)
     else:
-        chosen = "（不加载）"
-        st.caption("暂无历史文件")
+        chosen = "（不加载）" if not EN else "(none)"
+        st.caption(T["no_files"])
 
 
 @st.cache_data
