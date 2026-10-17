@@ -452,11 +452,15 @@ def load_data(file):
 
 @st.cache_data
 def load_data_bytes(b, name):
-    bio = io.BytesIO(b)
-    if name.endswith(".csv"):
-        return pd.read_csv(bio)
-    else:
-        return pd.read_excel(bio)
+    try:
+        bio = io.BytesIO(b)
+        if name.endswith(".csv"):
+            return pd.read_csv(bio)
+        else:
+            return pd.read_excel(bio)
+    except Exception as e:
+        st.error(f"文件「{name}」读取失败（可能已损坏），请重新上传。错误: {e}")
+        st.stop()
 
 
 # 确定数据源：优先新上传，其次历史文件
