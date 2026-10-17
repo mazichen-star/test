@@ -166,7 +166,13 @@ hr { border-color: #4a4d55; }
 light_css = """
 <style>
 .stPlot, [data-testid="stImage"] { display: flex; justify-content: center; }
-.stPlot img, [data-testid="stImage"] img { margin: auto; }
+.stPlot img, [data-testid="stImage"] img { margin: auto; max-width: 100%; height: auto; }
+@media (max-width: 768px) {
+    h1 { font-size: 1.6rem !important; }
+    h2, h3 { font-size: 1.2rem !important; }
+    [data-testid="stHorizontalBlock"] { flex-direction: column; }
+    [data-testid="stHorizontalBlock"] > div { width: 100% !important; }
+}
 </style>
 """
 
