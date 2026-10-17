@@ -92,6 +92,16 @@ def load_user_file(username, filename):
         return None
     return base64.b64decode(data[0]["content"])
 
+
+def change_password(username, new_pw):
+    requests.patch(f"{REST}/users?username=eq.{username}", headers=HEADERS,
+                   json={"password_hash": hash_pw(new_pw)}, timeout=15)
+
+
+def delete_account(username):
+    requests.delete(f"{REST}/user_files?username=eq.{username}", headers=HEADERS, timeout=15)
+    requests.delete(f"{REST}/users?username=eq.{username}", headers=HEADERS, timeout=15)
+
 # 解决 matplotlib 中文显示方块问题
 # 优先加载仓库自带的开源中文字体（Noto Sans SC），兼容 Windows / Linux / Streamlit Cloud
 _FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "NotoSansSC-Regular.ttf")
@@ -109,15 +119,32 @@ matplotlib.rcParams["font.sans-serif"] = [
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 st.set_page_config(page_title="力学性能预测系统", layout="wide")
-st.markdown(
-    """
-    <style>
-    .stPlot, [data-testid="stImage"] { display: flex; justify-content: center; }
-    .stPlot img, [data-testid="stImage"] img { margin: auto; }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+
+# 暗色模式切换
+if "dark_mode" not in st.session_state:
+    st.session_state["dark_mode"] = False
+
+dark_css = """
+<style>
+.stApp { background-color: #0e1117; color: #e6e6e6; }
+[data-testid="stSidebar"] { background-color: #1a1d24; }
+.stDataFrame, table { color: #e6e6e6; }
+h1, h2, h3, h4, p, label, span, div { color: #e6e6e6 !important; }
+</style>
+"""
+
+light_css = """
+<style>
+.stPlot, [data-testid="stImage"] { display: flex; justify-content: center; }
+.stPlot img, [data-testid="stImage"] img { margin: auto; }
+</style>
+"""
+
+st.session_state["dark_mode"] = st.sidebar.toggle("暗色模式", value=st.session_state["dark_mode"], key="dark_toggle")
+if st.session_state["dark_mode"]:
+    st.markdown(dark_css + light_css, unsafe_allow_html=True)
+else:
+    st.markdown(light_css, unsafe_allow_html=True)
 st.title("材料力学性能预测系统")
 st.markdown("上传 CSV / Excel 数据，训练回归模型，预测材料力学性能（抗拉强度、屈服强度、弹性模量、延伸率等）。")
 
@@ -157,6 +184,21 @@ with st.sidebar:
     if st.button("退出登录"):
         del st.session_state["username"]
         st.rerun()
+    with st.expander("账号设置"):
+        new_pw = st.text_input("新密码", type="password", key="new_pw")
+        confirm_pw = st.text_input("确认新密码", type="password", key="confirm_pw")
+        if st.button("修改密码"):
+            if not new_pw or new_pw != confirm_pw:
+                st.warning("两次新密码不一致")
+            else:
+                change_password(st.session_state["username"], new_pw)
+                st.success("密码已修改")
+        st.divider()
+        if st.button("删除账号", type="secondary"):
+            delete_account(st.session_state["username"])
+            st.success("账号已删除")
+            del st.session_state["username"]
+            st.rerun()
     st.divider()
 
     st.header("配置")
@@ -299,15 +341,46 @@ model_options = {
                                   learning_rate_init=0.001, random_state=42),
 }
 
-model_name = st.selectbox("选择模型", list(model_options.keys()) + ["高斯过程回归 (GPR)"], key="model_select")
+model_names = list(model_options.keys()) + ["高斯过程回归 (GPR)"]
+compare_mode = st.checkbox("多模型对比（同时训练多个模型，自动选最优）", key="compare_mode")
 
-gpr_kernel_name = None
-if model_name == "高斯过程回归 (GPR)":
-    gpr_kernel_name = st.selectbox("GPR 核函数", list(gpr_kernel_options.keys()), key="gpr_kernel_select")
-    st.caption("注意：GPR 复杂度 O(n^3)，样本数建议 < 2000；它还能输出预测不确定性（置信区间）。")
+if compare_mode:
+    selected_models = st.multiselect("选择要对比的模型", model_names,
+                                     default=["线性回归", "随机森林", "梯度提升树", "MLP 神经网络"],
+                                     key="compare_multi")
+    model_name = None
+    gpr_kernel_name = st.selectbox("GPR 核函数（如选了 GPR）", list(gpr_kernel_options.keys()),
+                                   key="gpr_kernel_select")
+else:
+    model_name = st.selectbox("选择模型", model_names, key="model_select")
+    gpr_kernel_name = None
+    if model_name == "高斯过程回归 (GPR)":
+        gpr_kernel_name = st.selectbox("GPR 核函数", list(gpr_kernel_options.keys()), key="gpr_kernel_select")
+        st.caption("注意：GPR 复杂度 O(n^3)，样本数建议 < 2000；它还能输出预测不确定性（置信区间）。")
 
 test_size = st.slider("测试集比例", 0.1, 0.4, 0.2, 0.05, key="test_size_slider")
 run_btn = st.button("开始训练与预测", type="primary")
+
+
+def build_model(name, n_est, gpr_kernel):
+    if name == "高斯过程回归 (GPR)":
+        return GaussianProcessRegressor(kernel=gpr_kernel_options[gpr_kernel],
+                                         n_restarts_optimizer=5, normalize_y=True, random_state=42)
+    opts = {
+        "线性回归": LinearRegression(),
+        "Ridge 回归": Ridge(alpha=1.0),
+        "Lasso 回归": Lasso(alpha=0.1, max_iter=5000),
+        "随机森林": RandomForestRegressor(n_estimators=n_est, random_state=42, n_jobs=-1),
+        "梯度提升树": GradientBoostingRegressor(n_estimators=n_est, learning_rate=0.05,
+                                                max_depth=4, subsample=0.8, random_state=42),
+        "极端随机树": ExtraTreesRegressor(n_estimators=n_est, random_state=42, n_jobs=-1),
+        "SVR 支持向量机": SVR(kernel="rbf", C=10, epsilon=0.05),
+        "核岭回归 (RBF)": KernelRidge(kernel="rbf", alpha=0.1, gamma=0.1),
+        "MLP 神经网络": MLPRegressor(hidden_layer_sizes=(128, 64, 32), activation="relu",
+                                      alpha=1e-3, max_iter=2000, early_stopping=True,
+                                      learning_rate_init=0.001, random_state=42),
+    }
+    return opts[name]
 
 if run_btn:
     X, y, data, le_dict = preprocess(df, feature_cols, target_col, fit=True)
@@ -315,8 +388,6 @@ if run_btn:
     if len(X) < 3:
         st.error("有效样本太少，请检查数据。")
         st.stop()
-    if model_name == "高斯过程回归 (GPR)" and len(X) > 3000:
-        st.warning(f"样本量 {len(X)} 较大，GPR 可能较慢（已继续执行，耐心等待）。")
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
 
@@ -324,14 +395,39 @@ if run_btn:
     X_train_s = scaler.fit_transform(X_train)
     X_test_s = scaler.transform(X_test)
 
-    if model_name == "高斯过程回归 (GPR)":
-        kernel = gpr_kernel_options[gpr_kernel_name]
-        model = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5,
-                                         normalize_y=True, random_state=42)
+    # ===== 多模型对比 =====
+    if compare_mode:
+        if not selected_models:
+            st.error("请至少选择一个模型进行对比")
+            st.stop()
+        rows = []
+        trained = {}
+        with st.spinner("正在训练并对比多个模型，请稍候..."):
+            for mname in selected_models:
+                try:
+                    m = build_model(mname, n_estimators, gpr_kernel_name)
+                    m.fit(X_train_s, y_train)
+                    yp = m.predict(X_test_s)
+                    r2v = r2_score(y_test, yp)
+                    maev = mean_absolute_error(y_test, yp)
+                    rmsev = np.sqrt(mean_squared_error(y_test, yp))
+                    trained[mname] = m
+                    rows.append({"模型": mname, "R2": r2v, "MAE": maev, "RMSE": rmsev})
+                except Exception as e:
+                    rows.append({"模型": mname, "R2": np.nan, "MAE": np.nan, "RMSE": np.nan})
+        cmp_df = pd.DataFrame(rows).sort_values("R2", ascending=False).reset_index(drop=True)
+        cmp_df.index = cmp_df.index + 1
+        cmp_df.index.name = "排名"
+        st.subheader("模型对比结果")
+        st.dataframe(cmp_df, use_container_width=True)
+        best_name = cmp_df["模型"].iloc[0]
+        st.success(f"最优模型: **{best_name}** (R2={cmp_df['R2'].iloc[0]:.4f})")
+        model = trained[best_name]
+        model_name = best_name
     else:
-        model = model_options[model_name]
-
-    model.fit(X_train_s, y_train)
+        with st.spinner(f"正在训练 {model_name} ..."):
+            model = build_model(model_name, n_estimators, gpr_kernel_name)
+            model.fit(X_train_s, y_train)
 
     is_gpr = isinstance(model, GaussianProcessRegressor)
     if is_gpr:
@@ -343,7 +439,8 @@ if run_btn:
     r2 = r2_score(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    cv_r2 = cross_val_score(model, scaler.fit_transform(X), y, cv=5, scoring="r2").mean()
+    with st.spinner("正在计算 5 折交叉验证..."):
+        cv_r2 = cross_val_score(model, scaler.fit_transform(X), y, cv=5, scoring="r2").mean()
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("测试集 R²", f"{r2:.4f}")
