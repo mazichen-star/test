@@ -855,6 +855,7 @@ if run_btn:
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     st.session_state["model"] = model
+    st.session_state["model_name"] = model_name
     st.session_state["scaler"] = scaler
     st.session_state["le_dict"] = le_dict
     st.session_state["feature_cols"] = feature_cols
@@ -915,6 +916,8 @@ elif not _HAS_SKOPT:
 else:
     fcols = st.session_state["feature_cols"]
     led = st.session_state["le_dict"]
+    cur_model = st.session_state.get("model_name", "未知")
+    st.info(f"当前贝叶斯优化使用的预测模型：**{cur_model}**")
     numeric_features = [f for f in fcols if f not in led]
     if not numeric_features:
         st.info("没有数值特征可优化（全是类别特征）。")
