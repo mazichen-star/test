@@ -20,28 +20,20 @@ import matplotlib
 from matplotlib import font_manager
 import os
 import io
-import sqlite3
 import hashlib
-from datetime import datetime
+import base64
+import requests
 
-# ============ 用户数据目录 ============
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-USER_DIR = os.path.join(DATA_DIR, "users")
-os.makedirs(USER_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, "users.db")
-
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-                    username TEXT PRIMARY KEY,
-                    password_hash TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )""")
-    conn.commit()
-    conn.close()
+# ============ Supabase 云数据库配置 ============
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://ibklzpdffeqfkcnocndd.supabase.co")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "sb_publishable_KHi99AcpezHYt8SKWWxBfA_8eo3OyB7")
+REST = f"{SUPABASE_URL}/rest/v1"
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation",
+}
 
 
 def hash_pw(pw):
@@ -49,39 +41,40 @@ def hash_pw(pw):
 
 
 def user_exists(username):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM users WHERE username=?", (username,))
-    r = c.fetchone()
-    conn.close()
-    return r is not None
+    r = requests.get(f"{REST}/users?username=eq.{username}&select=username", headers=HEADERS, timeout=15)
+    return len(r.json()) > 0
 
 
 def add_user(username, pw):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO users VALUES (?,?,?)",
-              (username, hash_pw(pw), datetime.now().isoformat(timespec="seconds")))
-    conn.commit()
-    conn.close()
+    requests.post(f"{REST}/users", headers=HEADERS,
+                  json={"username": username, "password_hash": hash_pw(pw)}, timeout=15)
 
 
 def verify_user(username, pw):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT password_hash FROM users WHERE username=?", (username,))
-    r = c.fetchone()
-    conn.close()
-    return r is not None and r[0] == hash_pw(pw)
+    r = requests.get(f"{REST}/users?username=eq.{username}&select=password_hash", headers=HEADERS, timeout=15)
+    data = r.json()
+    return bool(data) and data[0]["password_hash"] == hash_pw(pw)
 
 
-def user_dir(username):
-    d = os.path.join(USER_DIR, username)
-    os.makedirs(d, exist_ok=True)
-    return d
+def list_user_files(username):
+    r = requests.get(f"{REST}/user_files?username=eq.{username}&select=id,filename,uploaded_at&order=uploaded_at.desc",
+                     headers=HEADERS, timeout=15)
+    return r.json()
 
 
-init_db()
+def save_user_file(username, filename, content_bytes):
+    b64 = base64.b64encode(content_bytes).decode("ascii")
+    requests.post(f"{REST}/user_files", headers=HEADERS,
+                  json={"username": username, "filename": filename, "content": b64}, timeout=30)
+
+
+def load_user_file(username, filename):
+    r = requests.get(f"{REST}/user_files?username=eq.{username}&filename=eq.{filename}&select=content",
+                     headers=HEADERS, timeout=30)
+    data = r.json()
+    if not data:
+        return None
+    return base64.b64decode(data[0]["content"])
 
 # 解决 matplotlib 中文显示方块问题
 # 优先加载仓库自带的开源中文字体（Noto Sans SC），兼容 Windows / Linux / Streamlit Cloud
@@ -154,12 +147,16 @@ with st.sidebar:
     st.header("配置")
     uploaded_file = st.file_uploader("上传数据文件", type=["csv", "xlsx", "xls"])
 
-    # 历史文件
+    # 历史文件（从 Supabase 拉取）
     st.subheader("我的数据文件")
-    udir = user_dir(st.session_state["username"])
-    saved_files = [f for f in os.listdir(udir) if f.endswith((".csv", ".xlsx", ".xls"))]
-    if saved_files:
-        chosen = st.selectbox("选择已保存的文件", ["（不加载）"] + sorted(saved_files))
+    try:
+        saved = list_user_files(st.session_state["username"])
+        saved_names = [f["filename"] for f in saved]
+    except Exception as e:
+        saved_names = []
+        st.caption(f"无法加载历史文件列表")
+    if saved_names:
+        chosen = st.selectbox("选择已保存的文件", ["（不加载）"] + saved_names)
     else:
         chosen = "（不加载）"
         st.caption("暂无历史文件")
@@ -174,24 +171,30 @@ def load_data(file):
 
 
 @st.cache_data
-def load_data_path(path):
-    if path.endswith(".csv"):
-        return pd.read_csv(path)
+def load_data_bytes(b, name):
+    bio = io.BytesIO(b)
+    if name.endswith(".csv"):
+        return pd.read_csv(bio)
     else:
-        return pd.read_excel(path)
+        return pd.read_excel(bio)
 
 
 # 确定数据源：优先新上传，其次历史文件
 data_source = None
 if uploaded_file is not None:
-    # 保存到用户目录
-    save_path = os.path.join(user_dir(st.session_state["username"]), uploaded_file.name)
-    with open(save_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+    content = uploaded_file.getvalue()
+    try:
+        save_user_file(st.session_state["username"], uploaded_file.name, content)
+    except Exception as e:
+        st.warning(f"文件保存到云端失败: {e}")
     df = load_data(uploaded_file)
     data_source = uploaded_file.name
 elif chosen != "（不加载）":
-    df = load_data_path(os.path.join(udir, chosen))
+    b = load_user_file(st.session_state["username"], chosen)
+    if b is None:
+        st.error("读取历史文件失败")
+        st.stop()
+    df = load_data_bytes(b, chosen)
     data_source = chosen
 
 if data_source is None:
