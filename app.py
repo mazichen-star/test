@@ -241,8 +241,10 @@ if "username" not in st.session_state:
             else:
                 st.error("用户名或密码错误")
     with tab_reg:
+        st.caption("用户名：5-20 位，只能用数字、字母、下划线，不能含空格")
         u2 = st.text_input("设置用户名", key="reg_u")
         email2 = st.text_input("绑定邮箱（用于找回密码）", key="reg_email")
+        st.caption("密码：至少 8 位，须同时包含数字和字母，不能含空格")
         p2 = st.text_input("设置密码", type="password", key="reg_p")
         p3 = st.text_input("确认密码", type="password", key="reg_p3")
         if st.button("注册"):
