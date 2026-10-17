@@ -386,7 +386,7 @@ if "username" not in st.session_state:
 
 # 已登录
 if st.session_state.get("show_pw_reminder"):
-    st.warning(T["pw_reminder"], icon="🔑")
+    st.warning(T["pw_reminder"])
     if st.button(T["dismiss"]):
         st.session_state["show_pw_reminder"] = False
         st.rerun()
@@ -468,7 +468,7 @@ elif chosen not in ("（不加载）", "(none)"):
 
 
 # ============ 材料库：浏览 + 录入 ============
-with st.expander("📚 共享材料库（用户共建，去重录入）", expanded=False):
+with st.expander("共享材料库（用户共建，去重录入）", expanded=False):
     tab_browse, tab_add = st.tabs(["浏览/搜索", "录入新材料"])
     with tab_browse:
         kw = st.text_input("按化学式搜索（如 Fe、Al2O3）", value="", key="mat_kw")
