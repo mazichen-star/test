@@ -23,6 +23,9 @@ import io
 import hashlib
 import base64
 import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
 
 # ============ Supabase 云数据库配置 ============
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://ibklzpdffeqfkcnocndd.supabase.co")
@@ -111,6 +114,29 @@ def change_password(username, new_pw):
 def delete_account(username):
     requests.delete(f"{REST}/user_files?username=eq.{username}", headers=HEADERS, timeout=15)
     requests.delete(f"{REST}/users?username=eq.{username}", headers=HEADERS, timeout=15)
+
+
+def send_email(to_addr, subject, body):
+    """通过 st.secrets 配置的 SMTP 发送邮件。未配置时静默失败。"""
+    try:
+        host = st.secrets["SMTP_HOST"]
+        port = int(st.secrets.get("SMTP_PORT", 465))
+        user = st.secrets["SMTP_USER"]
+        pw = st.secrets["SMTP_PASSWORD"]
+    except KeyError:
+        return False, "未配置 SMTP"
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["From"] = Header(f"力学预测系统 <{user}>", "utf-8")
+    msg["To"] = to_addr
+    msg["Subject"] = Header(subject, "utf-8")
+    try:
+        with smtplib.SMTP_SSL(host, port, timeout=20) as s:
+            s.login(user, pw)
+            s.sendmail(user, [to_addr], msg.as_string())
+        return True, "ok"
+    except Exception as e:
+        return False, str(e)
 
 # 解决 matplotlib 中文显示方块问题
 # 优先加载仓库自带的开源中文字体（Noto Sans SC），兼容 Windows / Linux / Streamlit Cloud
@@ -246,8 +272,13 @@ if "username" not in st.session_state:
                 else:
                     tmp_pw = _secrets.token_urlsafe(8)
                     change_password(rec["username"], tmp_pw)
-                    st.success(f"账号 **{rec['username']}** 的临时密码: `{tmp_pw}`")
-                    st.info("请尽快登录并在「账号设置」里修改密码。")
+                    body = (f"您好，\n\n您的账号 {rec['username']} 的临时密码为：{tmp_pw}\n\n"
+                            f"请尽快登录并在「账号设置」中修改密码。\n\n此邮件由系统自动发送，请勿回复。")
+                    ok, msg = send_email(email_f, "力学预测系统 - 找回密码", body)
+                    if ok:
+                        st.success(f"临时密码已发送到 {email_f}，请查收邮件（含垃圾邮件箱）。")
+                    else:
+                        st.warning(f"邮件发送失败（{msg}），临时密码: `{tmp_pw}`")
     st.stop()
 
 # 已登录
