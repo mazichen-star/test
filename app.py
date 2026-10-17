@@ -26,6 +26,7 @@ import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.header import Header
+from email.utils import formataddr
 
 # ============ Supabase 云数据库配置 ============
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://ibklzpdffeqfkcnocndd.supabase.co")
@@ -127,7 +128,7 @@ def send_email(to_addr, subject, body):
         return False, "未配置 SMTP"
 
     msg = MIMEText(body, "plain", "utf-8")
-    msg["From"] = Header(f"力学预测系统 <{user}>", "utf-8")
+    msg["From"] = formataddr((str(Header("力学预测系统", "utf-8")), user))
     msg["To"] = to_addr
     msg["Subject"] = Header(subject, "utf-8")
     try:
