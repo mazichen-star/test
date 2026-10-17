@@ -29,8 +29,13 @@ from email.header import Header
 from email.utils import formataddr
 
 # ============ Supabase 云数据库配置 ============
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://ibklzpdffeqfkcnocndd.supabase.co")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "sb_publishable_KHi99AcpezHYt8SKWWxBfA_8eo3OyB7")
+# 请在 Streamlit Secrets 中配置 SUPABASE_URL 和 SUPABASE_KEY
+# 本地运行时可新建 .streamlit/secrets.toml
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("未配置 Supabase。请在 Streamlit Secrets 中设置 SUPABASE_URL 和 SUPABASE_KEY。")
+    st.stop()
 REST = f"{SUPABASE_URL}/rest/v1"
 HEADERS = {
     "apikey": SUPABASE_KEY,
