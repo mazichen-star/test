@@ -48,11 +48,21 @@ def user_exists(username):
     return len(r.json()) > 0
 
 
-def add_user(username, pw):
+def add_user(username, pw, email):
     r = requests.post(f"{REST}/users", headers=HEADERS,
-                      json={"username": username, "password_hash": hash_pw(pw)}, timeout=15)
+                      json={"username": username, "password_hash": hash_pw(pw), "email": email},
+                      timeout=15)
     if r.status_code not in (200, 201):
         st.error(f"注册失败({r.status_code}): {r.text[:200]}")
+
+
+def find_user_by_email(email):
+    r = requests.get(f"{REST}/users?email=eq.{email}&select=username,password_hash",
+                     headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    return data[0] if data else None
 
 
 def verify_user(username, pw):
@@ -184,9 +194,10 @@ else:
 st.title("材料力学性能预测系统")
 st.markdown("上传 CSV / Excel 数据，训练回归模型，预测材料力学性能（抗拉强度、屈服强度、弹性模量、延伸率等）。")
 
-# ============ 登录 / 注册 ============
+# ============ 登录 / 注册 / 找回密码 ============
+import secrets as _secrets
 if "username" not in st.session_state:
-    tab_login, tab_reg = st.tabs(["登录", "注册"])
+    tab_login, tab_reg, tab_forgot = st.tabs(["登录", "注册", "忘记密码"])
     with tab_login:
         u = st.text_input("用户名", key="login_u")
         p = st.text_input("密码", type="password", key="login_p")
@@ -200,18 +211,36 @@ if "username" not in st.session_state:
                 st.error("用户名或密码错误")
     with tab_reg:
         u2 = st.text_input("设置用户名", key="reg_u")
+        email2 = st.text_input("绑定邮箱（用于找回密码）", key="reg_email")
         p2 = st.text_input("设置密码", type="password", key="reg_p")
         p3 = st.text_input("确认密码", type="password", key="reg_p3")
         if st.button("注册"):
             if not u2 or not p2:
                 st.warning("用户名和密码不能为空")
+            elif not email2 or "@" not in email2:
+                st.warning("请输入有效邮箱")
             elif p2 != p3:
                 st.warning("两次密码不一致")
             elif user_exists(u2):
                 st.warning("该用户名已存在")
             else:
-                add_user(u2, p2)
+                add_user(u2, p2, email2)
                 st.success("注册成功，请登录")
+    with tab_forgot:
+        st.caption("输入注册时绑定的邮箱，系统会生成临时密码。")
+        email_f = st.text_input("绑定邮箱", key="forgot_email")
+        if st.button("找回密码"):
+            if not email_f:
+                st.warning("请输入邮箱")
+            else:
+                rec = find_user_by_email(email_f)
+                if rec is None:
+                    st.error("该邮箱未绑定任何账号")
+                else:
+                    tmp_pw = _secrets.token_urlsafe(8)
+                    change_password(rec["username"], tmp_pw)
+                    st.success(f"账号 **{rec['username']}** 的临时密码: `{tmp_pw}`")
+                    st.info("请尽快登录并在「账号设置」里修改密码。")
     st.stop()
 
 # 已登录
