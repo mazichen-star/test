@@ -148,7 +148,6 @@ if "username" not in st.session_state:
                 st.warning("该用户名已存在")
             else:
                 add_user(u2, p2)
-                user_dir(u2)
                 st.success("注册成功，请登录")
     st.stop()
 
