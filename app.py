@@ -117,11 +117,21 @@ def load_user_file(username, filename):
         return None
     raw = data[0]["content"]
     if isinstance(raw, str) and raw.startswith("\\x"):
-        return bytes.fromhex(raw[2:])
+        b = bytes.fromhex(raw[2:])
+    else:
+        try:
+            b = base64.b64decode(raw)
+        except Exception:
+            return None
+    # 兼容 PostgREST 未对 BYTEA 做 base64 解码的情况：
+    # 如果解出来的内容本身是一段 base64 文本，再解一次
     try:
-        return base64.b64decode(raw)
+        head = b[:200].decode("ascii")
+        if all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r" for c in head.strip()):
+            b = base64.b64decode(head.strip() + b[len(head):].decode("ascii"))
     except Exception:
-        return None
+        pass
+    return b
 
 
 
