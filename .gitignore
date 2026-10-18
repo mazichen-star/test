@@ -2,7 +2,12 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.deps/
+.pip-tmp/
 .env
 data/
-.streamlit/
+*.db
+.pytest_cache/
+.streamlit/secrets.toml
 .DS_Store
+*.log
