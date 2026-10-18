@@ -841,11 +841,19 @@ st.subheader("数据预览")
 st.dataframe(df, use_container_width=True, height=400)
 st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可上下左右滚动查看全部）")
 
-# AI 智能清洗
-ARK_KEY = st.secrets.get("ARK_API_KEY", "") or _os.environ.get("ARK_API_KEY", "")
-if not ARK_KEY:
-    st.caption("（在 Streamlit Secrets 配置 ARK_API_KEY 后可使用 AI 清洗）")
-if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_clean", disabled=not ARK_KEY):
+# AI 智能清洗（优先 DeepSeek，兼容火山方舟）
+_dk = st.secrets.get("DEEPSEEK_API_KEY", "") or _os.environ.get("DEEPSEEK_API_KEY", "")
+_ak = st.secrets.get("ARK_API_KEY", "") or _os.environ.get("ARK_API_KEY", "")
+AI_KEY = _dk or _ak
+if _dk:
+    AI_BASE = "https://api.deepseek.com/v1/chat/completions"
+    AI_MODEL = st.secrets.get("DEEPSEEK_MODEL", "") or _os.environ.get("DEEPSEEK_MODEL", "") or "deepseek-chat"
+else:
+    AI_BASE = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    AI_MODEL = st.secrets.get("ARK_MODEL", "") or _os.environ.get("ARK_MODEL", "ep-20261018150154-bhx49")
+if not AI_KEY:
+    st.caption("（在 Streamlit Secrets 配置 DEEPSEEK_API_KEY 后可使用 AI 清洗）")
+if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_clean", disabled=not AI_KEY):
     with st.spinner("AI 正在分析表格结构..."):
         try:
             csv_text = df.to_csv(index=False)
@@ -859,14 +867,14 @@ if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_cl
 表格内容：
 {csv_text[:4000]}"""
             r = requests.post(
-                "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-                headers={"Authorization": f"Bearer {ARK_KEY}", "Content-Type": "application/json"},
+                AI_BASE,
+                headers={"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"},
                 json={
-                    "model": (st.secrets.get("ARK_MODEL", "") or _os.environ.get("ARK_MODEL", "ep-20261018150154-bhx49")),
+                    "model": AI_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                 },
-                timeout=120,
+                timeout=60,
             )
             if r.status_code == 200:
                 ai_text = r.json()["choices"][0]["message"]["content"].strip()
