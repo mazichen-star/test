@@ -516,7 +516,7 @@ elif chosen not in ("（不加载）", "(none)"):
 
 # ============ 材料库：浏览 + 录入 ============
 with st.expander("共享材料库（用户共建，去重录入）", expanded=False):
-    tab_browse, tab_add, tab_batch = st.tabs(["浏览/搜索", "录入新材料", "批量导入"])
+    tab_browse, tab_add, tab_batch, tab_nlp = st.tabs(["浏览/搜索", "录入新材料", "批量导入", "文献NLP提取"])
     with tab_browse:
         kw = st.text_input("按化学式搜索（如 Fe、Al2O3）", value="", key="mat_kw")
         mats = list_materials(kw.strip())
@@ -724,6 +724,74 @@ with st.expander("材料性能对比（你的数据 vs 文献数据）", expande
                 ax.set_title("性能对比")
                 ax.legend()
                 st.pyplot(fig)
+
+    with tab_nlp:
+        st.caption("粘贴文献文本，或上传 PDF，自动提取材料性能字段。基于规则匹配，适合快速摘录。")
+        nlp_text = st.text_area("文献文本", height=200, key="nlp_text")
+        nlp_pdf = st.file_uploader("或上传 PDF", type=["pdf"], key="nlp_pdf")
+        if nlp_pdf is not None:
+            try:
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(nlp_pdf.read())) as pdf:
+                    nlp_text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+                st.caption(f"PDF 提取文本 {len(nlp_text)} 字符")
+            except Exception as e:
+                st.warning(f"PDF 读取失败: {e}")
+        if st.button("提取材料数据", type="primary", key="nlp_run"):
+            if not nlp_text or len(nlp_text) < 20:
+                st.warning("文本太短")
+            else:
+                import re as _re
+                # 化学式：匹配简单化学式（大写开头+小写数字）或合金牌号
+                formula_pat = _re.compile(r"\b((?:[A-Z][a-z]?\d*){2,}(?:-\d+\.?\d*)?)\b")
+                # 性能匹配：关键词 + 数字 + 单位
+                def grab(keywords, unit_pat):
+                    pat = _re.compile(r"(?:" + "|".join(keywords) + r")[^0-9-]{0,30}(-?\d+\.?\d*)\s*(" + unit_pat + r")", _re.I)
+                    m = pat.search(nlp_text)
+                    return float(m.group(1)) if m else None
+                ts = grab(["tensile strength", "ultimate tensile", "UTS", "抗拉强度", "拉伸强度"], "MPa")
+                ys = grab(["yield strength", "Yield stress", "YS", "屈服强度"], "MPa")
+                ym = grab(["Young'?s modulus", "elastic modulus", "E modulus", "杨氏模量", "弹性模量"], "GPa")
+                ec = grab(["electrical conductivity", "conductivity", "电导率", "导电率"], "S/m")
+                tc = grab(["thermal conductivity", "thermal cond", "热导率", "导热"], "W/(m|K)")
+                # DOI
+                doi_m = _re.search(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", nlp_text, _re.I)
+                doi = doi_m.group(0) if doi_m else ""
+                # 化学式：找第一个像化学式的
+                cand = formula_pat.findall(nlp_text)
+                cand = [c for c in cand if len(c) >= 2 and not c.isdigit() and c.upper() not in ("THE","AND","FOR","ARE","WITH","FROM","THIS","THAT","WITH","FIG","FIG.")]
+                formula = cand[0] if cand else ""
+                st.session_state["nlp_result"] = {
+                    "formula": formula, "tensile": ts, "yield": ys,
+                    "youngs": ym, "cond": ec, "therm": tc, "doi": doi
+                }
+        if "nlp_result" in st.session_state:
+            r = st.session_state["nlp_result"]
+            st.write("提取结果：")
+            st.json(r)
+            f_edit = st.text_input("确认/修改化学式", value=r["formula"], key="nlp_f")
+            if st.button("确认录入材料库", key="nlp_save"):
+                if not f_edit.strip():
+                    st.warning("化学式为空")
+                else:
+                    props = {}
+                    if r["tensile"]: props["tensile_strength"] = r["tensile"]
+                    if r["yield"]: props["yield_strength"] = r["yield"]
+                    if r["youngs"]: props["youngs_modulus"] = r["youngs"]
+                    if r["cond"]: props["conductivity"] = r["cond"]
+                    if r["therm"]: props["thermal_conductivity"] = r["therm"]
+                    dup = find_material(f_edit)
+                    if dup:
+                        st.warning(f"该材料已在库中（ID={dup['id']}）")
+                    else:
+                        ok, msg = add_material(f_edit, "", props, "文献报道",
+                                              st.session_state["username"], r["doi"])
+                        if ok:
+                            st.success("已录入材料库")
+                            del st.session_state["nlp_result"]
+                            st.rerun()
+                        else:
+                            st.error(f"录入失败: {msg}")
 
 if data_source is None:
     st.info("请在左侧上传数据文件，或选择已保存的文件开始使用。")
