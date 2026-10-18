@@ -485,37 +485,36 @@ def load_data(file):
 def _smart_clean_excel(raw):
     """自动识别实验报告格式：找表头行、跳单位行、去空行空列。"""
     df = raw.copy()
-    # 找表头行：前 30 行内，非空单元格 >= 2，且包含常见表头关键词
     keywords = ["长度", "宽度", "强度", "载荷", "应力", "应变", "模量", "硬度",
-                "mm", "MPa", "N", "GPa", "试样", "编号", "直径", "厚度"]
+                "mm", "MPa", "GPa", "直径", "厚度", "编号"]
+    unit_tokens = ["mm", "MPa", "GPa", "μm", "°C", "S/m", "W/(m", "N)"]
     header_idx = None
     for i in range(len(df)):
         row = df.iloc[i].astype(str)
         non_empty = row[(row != "nan") & (row.str.strip() != "")]
-        if len(non_empty) >= 2:
+        # 表头行至少 3 个非空单元格（数据表头有多列，区别于参数行的 key-value）
+        if len(non_empty) >= 3:
             joined = " ".join(non_empty.tolist())
             hits = sum(1 for k in keywords if k.lower() in joined.lower())
             if hits >= 1:
                 header_idx = i
                 break
     if header_idx is None:
-        # 没识别到特殊格式，简单去空行空列
         df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
         return df.reset_index(drop=True)
-    # 表头行作为列名
     headers = [str(x) if str(x) != "nan" else f"col_{j}" for j, x in enumerate(df.iloc[header_idx])]
-    # 表头下一行如果是单位行（mm/MPa/N 等），跳过
     start = header_idx + 1
+    # 跳单位行
     if start < len(df):
         nxt = df.iloc[start].astype(str)
-        nxt_nonempty = nxt[nxt != "nan"].tolist()
-        if nxt_nonempty and all(any(u in v for u in ["mm","MPa","N","GPa","μm","°C","%","S/m","W/"]) for v in nxt_nonempty):
+        nxt_nonempty = [v for v in nxt.tolist() if v != "nan" and v.strip()]
+        if nxt_nonempty and sum(any(u in v for u in unit_tokens) for v in nxt_nonempty) >= 1:
             start += 1
     data = df.iloc[start:].copy()
     data.columns = headers
+    # 去掉尾部签名行（最后几行如果非空单元格 < 2 就删）
     data = data.dropna(axis=0, how="all").dropna(axis=1, how="all")
     data = data.reset_index(drop=True)
-    # 去掉列名里的 nan
     data.columns = [c if c and c != "nan" else f"col_{i}" for i, c in enumerate(data.columns)]
     return data
 
