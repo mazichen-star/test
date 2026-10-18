@@ -856,7 +856,7 @@ if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_cl
 3. 返回干净的 CSV（带表头，不要解释，不要 markdown 代码块，直接输出 CSV 文本）
 
 表格内容：
-{csv_text[:8000]}"""
+{csv_text[:4000]}"""
             r = requests.post(
                 "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
                 headers={"Authorization": f"Bearer {ARK_KEY}", "Content-Type": "application/json"},
@@ -865,7 +865,7 @@ if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_cl
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                 },
-                timeout=60,
+                timeout=120,
             )
             if r.status_code == 200:
                 ai_text = r.json()["choices"][0]["message"]["content"].strip()
