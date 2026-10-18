@@ -885,11 +885,11 @@ else:
                     new_df = pd.read_csv(io.StringIO(ai_text))
                     st.session_state["df_cleaned"] = new_df
                     st.session_state["_clean_sig"] = _sig
-                    st.success("AI 自动清洗完成")
+                    st.rerun()
                 else:
-                    st.warning(f"AI 清洗跳过({r.status_code})，使用原始数据")
+                    st.caption(f"AI 清洗跳过({r.status_code})，使用原始数据")
             except Exception as e:
-                st.warning(f"AI 清洗出错，使用原始数据: {e}")
+                st.caption(f"AI 清洗出错，使用原始数据: {e}")
 
 # 如果 AI 清洗过，用清洗后的 df
 if "df_cleaned" in st.session_state:
