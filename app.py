@@ -853,11 +853,13 @@ else:
     AI_MODEL = st.secrets.get("ARK_MODEL", "") or _os.environ.get("ARK_MODEL", "ep-20261018150154-bhx49")
 if not AI_KEY:
     st.caption("（在 Streamlit Secrets 配置 DEEPSEEK_API_KEY 后可使用 AI 清洗）")
-if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_clean", disabled=not AI_KEY):
-    with st.spinner("AI 正在分析表格结构..."):
-        try:
-            csv_text = df.to_csv(index=False)
-            prompt = f"""你是材料实验数据清洗助手。下面是一个 Excel 表格导出的 CSV 文本，可能包含：标题行、参数行（如"试样长度 10mm"）、真正的表头行、单位行（mm/MPa/N）、数据行、空行、尾部签名行。
+else:
+    _sig = hash(str(df.shape) + str(df.columns.tolist())[:200])
+    if "df_cleaned" not in st.session_state or st.session_state.get("_clean_sig") != _sig:
+        with st.spinner("AI 正在自动清洗表格结构..."):
+            try:
+                csv_text = df.to_csv(index=False)
+                prompt = f"""你是材料实验数据清洗助手。下面是一个 Excel 表格导出的 CSV 文本，可能包含：标题行、参数行（如"试样长度 10mm"）、真正的表头行、单位行（mm/MPa/N）、数据行、空行、尾部签名行。
 
 请：
 1. 识别真正的数据表头行
@@ -866,29 +868,28 @@ if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_cl
 
 表格内容：
 {csv_text[:4000]}"""
-            r = requests.post(
-                AI_BASE,
-                headers={"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": AI_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                },
-                timeout=60,
-            )
-            if r.status_code == 200:
-                ai_text = r.json()["choices"][0]["message"]["content"].strip()
-                # 去掉可能的 markdown 代码块
-                if ai_text.startswith("```"):
-                    ai_text = ai_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-                new_df = pd.read_csv(io.StringIO(ai_text))
-                st.session_state["df_cleaned"] = new_df
-                st.success("AI 清洗完成，已替换数据")
-                st.dataframe(new_df, use_container_width=True, height=400)
-            else:
-                st.error(f"AI 调用失败({r.status_code}): {r.text[:300]}")
-        except Exception as e:
-            st.error(f"AI 清洗出错: {e}")
+                r = requests.post(
+                    AI_BASE,
+                    headers={"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": AI_MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1,
+                    },
+                    timeout=60,
+                )
+                if r.status_code == 200:
+                    ai_text = r.json()["choices"][0]["message"]["content"].strip()
+                    if ai_text.startswith("```"):
+                        ai_text = ai_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                    new_df = pd.read_csv(io.StringIO(ai_text))
+                    st.session_state["df_cleaned"] = new_df
+                    st.session_state["_clean_sig"] = _sig
+                    st.success("AI 自动清洗完成")
+                else:
+                    st.warning(f"AI 清洗跳过({r.status_code})，使用原始数据")
+            except Exception as e:
+                st.warning(f"AI 清洗出错，使用原始数据: {e}")
 
 # 如果 AI 清洗过，用清洗后的 df
 if "df_cleaned" in st.session_state:
