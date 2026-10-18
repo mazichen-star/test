@@ -42,7 +42,12 @@ def get_secret(key: str, default: str = "") -> str:
 
 
 def supabase_url() -> str:
-    return get_secret("SUPABASE_URL").strip().rstrip("/")
+    url = get_secret("SUPABASE_URL").strip().rstrip("/")
+    # 兼容直接粘贴 Supabase REST 地址：
+    # https://xxx.supabase.co/rest/v1/ -> https://xxx.supabase.co
+    if url.endswith("/rest/v1"):
+        url = url[: -len("/rest/v1")].rstrip("/")
+    return url
 
 
 def supabase_key() -> str:

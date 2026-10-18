@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from core.config import supabase_url
 from core.data import (
     default_target_column,
     preprocess,
@@ -38,6 +39,13 @@ def make_frame(rows: int = 24) -> pd.DataFrame:
         + rng.normal(0, 8, rows)
     )
     return frame
+
+
+def test_supabase_url_accepts_rest_suffix(monkeypatch):
+    monkeypatch.setenv(
+        "SUPABASE_URL", "https://example.supabase.co/rest/v1/"
+    )
+    assert supabase_url() == "https://example.supabase.co"
 
 
 def test_password_hash_and_legacy_compatibility():
