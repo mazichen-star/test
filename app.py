@@ -871,8 +871,7 @@ if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_cl
                 ai_text = r.json()["choices"][0]["message"]["content"].strip()
                 # 去掉可能的 markdown 代码块
                 if ai_text.startswith("```"):
-                    ai_text = ai_text.split("
-", 1)[1].rsplit("```", 1)[0].strip()
+                    ai_text = ai_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
                 new_df = pd.read_csv(io.StringIO(ai_text))
                 st.session_state["df_cleaned"] = new_df
                 st.success("AI 清洗完成，已替换数据")
