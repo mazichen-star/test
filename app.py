@@ -1707,19 +1707,7 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
     data_source = ""
     none_label = tr("（不加载）", "(none)")
 
-    if uploaded_file is not None:
-        content = uploaded_file.getvalue()
-        data_source = uploaded_file.name
-        signature = dataset_signature(content, data_source)
-        if st.session_state.get("saved_upload_signature") != signature:
-            try:
-                STORAGE.save_user_file(
-                    st.session_state["username"], data_source, content
-                )
-                st.session_state["saved_upload_signature"] = signature
-            except StorageError as exc:
-                st.warning(f"{tr('保存到云端失败', 'Cloud save failed')}：{exc}")
-    elif chosen_file and chosen_file != none_label:
+    if chosen_file and chosen_file != none_label:
         try:
             content = STORAGE.load_user_file(
                 st.session_state["username"], chosen_file
@@ -1731,6 +1719,18 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
         if content is None:
             st.error(tr("读取历史文件失败", "Failed to load saved file"))
             return
+    elif uploaded_file is not None:
+        content = uploaded_file.getvalue()
+        data_source = uploaded_file.name
+        signature = dataset_signature(content, data_source)
+        if st.session_state.get("saved_upload_signature") != signature:
+            try:
+                STORAGE.save_user_file(
+                    st.session_state["username"], data_source, content
+                )
+                st.session_state["saved_upload_signature"] = signature
+            except StorageError as exc:
+                st.warning(f"{tr('保存到云端失败', 'Cloud save failed')}：{exc}")
 
     if content is None:
         st.info(
