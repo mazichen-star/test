@@ -840,6 +840,53 @@ st.subheader("数据预览")
 st.dataframe(df, use_container_width=True, height=400)
 st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可上下左右滚动查看全部）")
 
+# AI 智能清洗
+ARK_KEY = st.secrets.get("ARK_API_KEY", "")
+if not ARK_KEY:
+    st.caption("（在 Streamlit Secrets 配置 ARK_API_KEY 后可使用 AI 清洗）")
+if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_clean", disabled=not ARK_KEY):
+    with st.spinner("AI 正在分析表格结构..."):
+        try:
+            csv_text = df.to_csv(index=False)
+            prompt = f"""你是材料实验数据清洗助手。下面是一个 Excel 表格导出的 CSV 文本，可能包含：标题行、参数行（如"试样长度 10mm"）、真正的表头行、单位行（mm/MPa/N）、数据行、空行、尾部签名行。
+
+请：
+1. 识别真正的数据表头行
+2. 跳过单位行、标题行、参数行、空行、签名行
+3. 返回干净的 CSV（带表头，不要解释，不要 markdown 代码块，直接输出 CSV 文本）
+
+表格内容：
+{csv_text[:8000]}"""
+            r = requests.post(
+                "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+                headers={"Authorization": f"Bearer {ARK_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": "doubao-pro-32k",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                },
+                timeout=60,
+            )
+            if r.status_code == 200:
+                ai_text = r.json()["choices"][0]["message"]["content"].strip()
+                # 去掉可能的 markdown 代码块
+                if ai_text.startswith("```"):
+                    ai_text = ai_text.split("
+", 1)[1].rsplit("```", 1)[0].strip()
+                new_df = pd.read_csv(io.StringIO(ai_text))
+                st.session_state["df_cleaned"] = new_df
+                st.success("AI 清洗完成，已替换数据")
+                st.dataframe(new_df, use_container_width=True, height=400)
+            else:
+                st.error(f"AI 调用失败({r.status_code}): {r.text[:300]}")
+        except Exception as e:
+            st.error(f"AI 清洗出错: {e}")
+
+# 如果 AI 清洗过，用清洗后的 df
+if "df_cleaned" in st.session_state:
+    df = st.session_state["df_cleaned"]
+    st.caption("（已应用 AI 清洗后的数据）")
+
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 cat_cols = [c for c in df.columns if c not in numeric_cols]
 
