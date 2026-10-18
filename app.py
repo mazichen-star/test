@@ -138,7 +138,7 @@ def load_user_file(username, filename):
 
 # ============ 共享材料库 ============
 def list_materials(keyword=""):
-    url = f"{REST}/material_library?select=id,formula,structure,properties,source,contributor,created_at&order=created_at.desc"
+    url = f"{REST}/material_library?select=id,formula,structure,properties,source,reference,contributor,created_at&order=created_at.desc"
     if keyword:
         url += "&formula=ilike.*" + keyword + "*"
     r = requests.get(url, headers=HEADERS, timeout=15)
@@ -156,9 +156,10 @@ def find_material(formula):
             return m
     return None
 
-def add_material(formula, structure, properties, source, contributor):
+def add_material(formula, structure, properties, source, contributor, reference=""):
     payload = {"formula": formula.strip(), "structure": structure.strip(),
-               "properties": properties, "source": source.strip(), "contributor": contributor}
+               "properties": properties, "source": source.strip(), "reference": reference.strip(),
+               "contributor": contributor}
     r = requests.post(f"{REST}/material_library", headers=HEADERS, json=payload, timeout=15)
     return r.status_code in (200,201), r.text[:300]
 
@@ -515,6 +516,7 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                     "电导率(S/m)": p.get("conductivity"),
                     "热导率(W/mK)": p.get("thermal_conductivity"),
                     "数据来源": m.get("source"),
+                    "参考文献": m.get("reference"),
                     "录入者": m.get("contributor"),
                 })
             st.dataframe(rows, use_container_width=True, height=300)
@@ -524,6 +526,7 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
             f_new = st.text_input("化学式/成分（如 Fe-0.2C、Al2O3、PLA）", key="mat_formula")
             s_new = st.text_input("结构描述（如 奥氏体FCC、马氏体、非晶）", key="mat_struct")
             src_new = st.selectbox("数据来源", ["实验测量", "文献报道", "手册数据", "估算/预测"], key="mat_source")
+            ref_new = st.text_input("参考文献（标题/DOI，选填）", key="mat_ref")
         with c2:
             ts = st.number_input("抗拉强度 MPa（可选）", value=0.0, step=10.0, key="mat_ts")
             ys = st.number_input("屈服强度 MPa（可选）", value=0.0, step=10.0, key="mat_ys")
@@ -544,7 +547,7 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                     if ym: props["youngs_modulus"] = ym
                     if ec: props["conductivity"] = ec
                     if tc: props["thermal_conductivity"] = tc
-                    ok, msg = add_material(f_new, s_new, props, src_new, st.session_state["username"])
+                    ok, msg = add_material(f_new, s_new, props, src_new, st.session_state["username"], ref_new)
                     if ok:
                         st.success("录入成功，已加入共享材料库")
                         st.rerun()
@@ -574,6 +577,7 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                     "conductivity": ["conductivity", "electrical_conductivity", "电导率", "导电率"],
                     "thermal_conductivity": ["thermal_conductivity", "tc", "热导率", "导热系数"],
                     "source": ["source", "data_source", "来源", "数据来源", "文献"],
+                    "reference": ["reference", "ref", "doi", "citation", "参考文献", "文献标题", "引用"],
                 }
                 norm = {}
                 for std, aliases in COL_ALIAS.items():
@@ -611,11 +615,14 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                             if s.lower() == "nan": s = ""
                             ssrc = str(row.get(norm.get("source",""),"")).strip()
                             if ssrc.lower() == "nan": ssrc = "批量导入"
+                            sref = str(row.get(norm.get("reference",""),"")).strip()
+                            if sref.lower() == "nan": sref = ""
                         rows_to_insert.append({
                             "formula": f,
                             "structure": s,
                             "properties": props,
                             "source": ssrc,
+                            "reference": sref,
                             "contributor": st.session_state["username"],
                         })
                         existing_set.add(f.upper())
@@ -629,6 +636,60 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                             st.rerun()
                         else:
                             st.error(f"导入失败({r.status_code}): {r.text[:300]}")
+
+# ============ 材料性能对比 ============
+with st.expander("材料性能对比（你的数据 vs 文献数据）", expanded=False):
+    all_mats = list_materials()
+    if len(all_mats) < 2:
+        st.info("库中至少需要 2 条材料才能对比")
+    else:
+        opts = {f"#{m['id']}  {m['formula']}": m for m in all_mats}
+        c1, c2 = st.columns(2)
+        with c1:
+            sel1 = st.selectbox("材料 A", list(opts.keys()), key="cmp_a")
+        with c2:
+            sel2 = st.selectbox("材料 B", list(opts.keys()), key="cmp_b", index=1)
+        if sel1 != sel2:
+            m1, m2 = opts[sel1], opts[sel2]
+            p1 = m1.get("properties") or {}
+            p2 = m2.get("properties") or {}
+            metrics_list = [("抗拉强度", "tensile_strength", "MPa"),
+                           ("屈服强度", "yield_strength", "MPa"),
+                           ("杨氏模量", "youngs_modulus", "GPa"),
+                           ("电导率", "conductivity", "S/m"),
+                           ("热导率", "thermal_conductivity", "W/(m·K)")]
+            cmp_rows = []
+            plot_labels, plot_a, plot_b = [], [], []
+            for label, key, unit in metrics_list:
+                v1 = p1.get(key)
+                v2 = p2.get(key)
+                if v1 is not None or v2 is not None:
+                    cmp_rows.append({
+                        "指标": f"{label} ({unit})",
+                        f"A: {m1['formula']}": v1 if v1 is not None else "-",
+                        f"B: {m2['formula']}": v2 if v2 is not None else "-",
+                        "差值(B-A)": (v2 - v1) if (v1 is not None and v2 is not None) else "-",
+                    })
+                    if v1 is not None and v2 is not None:
+                        plot_labels.append(label)
+                        plot_a.append(v1)
+                        plot_b.append(v2)
+            st.dataframe(cmp_rows, use_container_width=True)
+            if m1.get("reference"):
+                st.caption(f"A 参考文献：{m1['reference']}")
+            if m2.get("reference"):
+                st.caption(f"B 参考文献：{m2['reference']}")
+            if plot_labels:
+                fig, ax = plt.subplots(figsize=(8, 4))
+                x = range(len(plot_labels))
+                w = 0.35
+                ax.bar([i - w/2 for i in x], plot_a, w, label=f"A: {m1['formula']}")
+                ax.bar([i + w/2 for i in x], plot_b, w, label=f"B: {m2['formula']}")
+                ax.set_xticks(list(x))
+                ax.set_xticklabels(plot_labels, rotation=20)
+                ax.set_title("性能对比")
+                ax.legend()
+                st.pyplot(fig)
 
 if data_source is None:
     st.info("请在左侧上传数据文件，或选择已保存的文件开始使用。")
