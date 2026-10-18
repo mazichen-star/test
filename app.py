@@ -489,7 +489,7 @@ def _smart_clean_excel(raw):
     keywords = ["长度", "宽度", "强度", "载荷", "应力", "应变", "模量", "硬度",
                 "mm", "MPa", "N", "GPa", "试样", "编号", "直径", "厚度"]
     header_idx = None
-    for i in range(min(30, len(df))):
+    for i in range(len(df)):
         row = df.iloc[i].astype(str)
         non_empty = row[(row != "nan") & (row.str.strip() != "")]
         if len(non_empty) >= 2:
