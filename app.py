@@ -37,8 +37,9 @@ from email.utils import formataddr
 # ============ Supabase 云数据库配置 ============
 # 请在 Streamlit Secrets 中配置 SUPABASE_URL 和 SUPABASE_KEY
 # 本地运行时可新建 .streamlit/secrets.toml
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
+import os as _os
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "") or _os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "") or _os.environ.get("SUPABASE_KEY", "")
 if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("未配置 Supabase。请在 Streamlit Secrets 中设置 SUPABASE_URL 和 SUPABASE_KEY。")
     st.stop()
@@ -841,7 +842,7 @@ st.dataframe(df, use_container_width=True, height=400)
 st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可上下左右滚动查看全部）")
 
 # AI 智能清洗
-ARK_KEY = st.secrets.get("ARK_API_KEY", "")
+ARK_KEY = st.secrets.get("ARK_API_KEY", "") or _os.environ.get("ARK_API_KEY", "")
 if not ARK_KEY:
     st.caption("（在 Streamlit Secrets 配置 ARK_API_KEY 后可使用 AI 清洗）")
 if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_clean", disabled=not ARK_KEY):
@@ -861,7 +862,7 @@ if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_cl
                 "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
                 headers={"Authorization": f"Bearer {ARK_KEY}", "Content-Type": "application/json"},
                 json={
-                    "model": st.secrets.get("ARK_MODEL", "ep-20261018150154-bhx49"),
+                    "model": (st.secrets.get("ARK_MODEL", "") or _os.environ.get("ARK_MODEL", "ep-20261018150154-bhx49")),
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                 },
