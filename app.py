@@ -482,13 +482,52 @@ def load_data(file):
 
 
 @st.cache_data
+def _smart_clean_excel(raw):
+    """自动识别实验报告格式：找表头行、跳单位行、去空行空列。"""
+    df = raw.copy()
+    # 找表头行：前 30 行内，非空单元格 >= 2，且包含常见表头关键词
+    keywords = ["长度", "宽度", "强度", "载荷", "应力", "应变", "模量", "硬度",
+                "mm", "MPa", "N", "GPa", "试样", "编号", "直径", "厚度"]
+    header_idx = None
+    for i in range(min(30, len(df))):
+        row = df.iloc[i].astype(str)
+        non_empty = row[(row != "nan") & (row.str.strip() != "")]
+        if len(non_empty) >= 2:
+            joined = " ".join(non_empty.tolist())
+            hits = sum(1 for k in keywords if k.lower() in joined.lower())
+            if hits >= 1:
+                header_idx = i
+                break
+    if header_idx is None:
+        # 没识别到特殊格式，简单去空行空列
+        df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+        return df.reset_index(drop=True)
+    # 表头行作为列名
+    headers = [str(x) if str(x) != "nan" else f"col_{j}" for j, x in enumerate(df.iloc[header_idx])]
+    # 表头下一行如果是单位行（mm/MPa/N 等），跳过
+    start = header_idx + 1
+    if start < len(df):
+        nxt = df.iloc[start].astype(str)
+        nxt_nonempty = nxt[nxt != "nan"].tolist()
+        if nxt_nonempty and all(any(u in v for u in ["mm","MPa","N","GPa","μm","°C","%","S/m","W/"]) for v in nxt_nonempty):
+            start += 1
+    data = df.iloc[start:].copy()
+    data.columns = headers
+    data = data.dropna(axis=0, how="all").dropna(axis=1, how="all")
+    data = data.reset_index(drop=True)
+    # 去掉列名里的 nan
+    data.columns = [c if c and c != "nan" else f"col_{i}" for i, c in enumerate(data.columns)]
+    return data
+
+
 def load_data_bytes(b, name):
     try:
         bio = io.BytesIO(b)
         if name.endswith(".csv"):
             return pd.read_csv(bio)
         else:
-            return pd.read_excel(bio)
+            raw = pd.read_excel(bio, header=None)
+            return _smart_clean_excel(raw)
     except Exception as e:
         st.error(f"文件「{name}」读取失败（可能已损坏），请重新上传。错误: {e}")
         st.stop()
