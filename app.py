@@ -970,11 +970,11 @@ def render_nlp_tab() -> None:
         st.json(result)
         formula_edit = st.text_input(
             tr("确认/修改化学式", "Confirm/edit formula"),
-            value=result.get("formula", ""),
+            value=result.get("formula") or "",
             key="nlp_formula_edit",
         )
         if st.button(tr("确认录入材料库", "Save to library"), key="nlp_save_btn"):
-            if not formula_edit.strip():
+            if not (formula_edit or "").strip():
                 st.warning(tr("化学式为空", "Formula is empty"))
             else:
                 try:
