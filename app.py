@@ -897,65 +897,72 @@ def render_nlp_tab() -> None:
         if not text or len(text) < 20:
             st.warning(tr("文本太短", "Text is too short"))
         else:
-            formula_pattern = re.compile(
-                r"\b((?:[A-Z][a-z]?\d*){2,}(?:[-–]\d+(?:\.\d+)?[A-Za-z]*)?)\b"
-            )
+            _ai_key, _ai_base, _ai_model = ai_config()
+            result = None
+            if _ai_key:
+                with st.spinner(tr("AI 正在提取文献数据...", "AI extracting...")):
+                    try:
+                        prompt = f"""从下面材料科学文献文本中提取材料性能数据，返回JSON格式，不要解释。
+字段：
+- formula: 材料化学式/成分（如 Al2O3, Ti6Al4V, 304 stainless steel）
+- tensile: 抗拉强度(MPa)，没有则null
+- yield: 屈服强度(MPa)，没有则null
+- youngs: 杨氏模量(GPa)，没有则null
+- cond: 电导率(S/m)，没有则null
+- therm: 热导率(W/(m·K))，没有则null
+- doi: DOI号，没有则空字符串
 
-            def grab(keywords: list[str], unit_pattern: str) -> float | None:
-                # 不要求关键词与数字之间完全没有数字：材料式（Al2O3）本身含数字。
-                keyword_pattern = re.compile("|".join(keywords), re.I)
-                value_pattern = re.compile(
-                    r"(-?\d+(?:\.\d+)?)\s*(" + unit_pattern + r")", re.I
+文献文本：
+{text[:4000]}"""
+                        r = requests.post(
+                            _ai_base,
+                            headers={"Authorization": f"Bearer {_ai_key}", "Content-Type": "application/json"},
+                            json={"model": _ai_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1},
+                            timeout=60,
+                        )
+                        if r.status_code == 200:
+                            import json as _json
+                            raw = r.json()["choices"][0]["message"]["content"].strip()
+                            if raw.startswith("```"):
+                                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                            result = _json.loads(raw)
+                    except Exception as exc:
+                        st.caption(f"AI 提取失败，改用规则提取: {exc}")
+            if result is None:
+                # 正则 fallback
+                formula_pattern = re.compile(
+                    r"\b((?:[A-Z][a-z]?\d*){2,}(?:[-–]\d+(?:\.\d+)?[A-Za-z]*)?)\b"
                 )
-                for match in keyword_pattern.finditer(text):
-                    window = text[match.end() : match.end() + 100]
-                    value = value_pattern.search(window)
-                    if value:
-                        return float(value.group(1))
-                return None
-
-            tensile = grab(
-                ["tensile strength", "ultimate tensile", "UTS", "抗拉强度", "拉伸强度"],
-                r"MPa",
-            )
-            yield_strength = grab(
-                ["yield strength", "yield stress", "YS", "屈服强度"], r"MPa"
-            )
-            modulus = grab(
-                ["Young'?s modulus", "elastic modulus", "E modulus", "杨氏模量",
-                 "弹性模量"],
-                r"GPa",
-            )
-            conductivity = grab(
-                ["electrical conductivity", "conductivity", "电导率", "导电率"],
-                r"S\s*/\s*m",
-            )
-            thermal = grab(
-                ["thermal conductivity", "thermal cond", "热导率", "导热"],
-                r"W\s*/\s*(?:\(\s*m\s*[·*]?\s*K\s*\)|m\s*[·*]?\s*K)",
-            )
-            doi_match = re.search(
-                r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", text, re.I
-            )
-            candidates = formula_pattern.findall(text)
-            stop = {
-                "THE", "AND", "FOR", "ARE", "WITH", "FROM", "THIS", "THAT",
-                "FIG", "TABLE", "ALLOY", "STEEL", "SAMPLE",
-            }
-            candidates = [
-                candidate
-                for candidate in candidates
-                if len(candidate) >= 2 and candidate.upper() not in stop
-            ]
-            st.session_state["nlp_result"] = {
-                "formula": candidates[0] if candidates else "",
-                "tensile": tensile,
-                "yield": yield_strength,
-                "youngs": modulus,
-                "cond": conductivity,
-                "therm": thermal,
-                "doi": doi_match.group(0) if doi_match else "",
-            }
+                def grab(keywords, unit_pattern):
+                    keyword_pattern = re.compile("|".join(keywords), re.I)
+                    value_pattern = re.compile(
+                        r"(-?\d+(?:\.\d+)?)\s*(" + unit_pattern + r")", re.I
+                    )
+                    for match in keyword_pattern.finditer(text):
+                        window = text[match.end(): match.end() + 100]
+                        value = value_pattern.search(window)
+                        if value:
+                            return float(value.group(1))
+                    return None
+                tensile = grab(["tensile strength","ultimate tensile","UTS","抗拉强度","拉伸强度"], r"MPa")
+                yield_strength = grab(["yield strength","yield stress","YS","屈服强度"], r"MPa")
+                modulus = grab(["Young'?s modulus","elastic modulus","杨氏模量","弹性模量"], r"GPa")
+                conductivity = grab(["conductivity","电导率","导电率"], r"S\s*/\s*m")
+                thermal = grab(["thermal conductivity","热导率","导热"], r"W\s*/\s*(?:\(\s*m\s*[·*]?\s*K\s*\)|m\s*[·*]?\s*K)")
+                doi_match = re.search(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", text, re.I)
+                candidates = formula_pattern.findall(text)
+                stop = {"THE","AND","FOR","ARE","WITH","FROM","THIS","THAT","FIG","TABLE","ALLOY","STEEL","SAMPLE"}
+                candidates = [c for c in candidates if len(c) >= 2 and c.upper() not in stop]
+                result = {
+                    "formula": candidates[0] if candidates else "",
+                    "tensile": tensile,
+                    "yield": yield_strength,
+                    "youngs": modulus,
+                    "cond": conductivity,
+                    "therm": thermal,
+                    "doi": doi_match.group(0) if doi_match else "",
+                }
+            st.session_state["nlp_result"] = result
 
     if "nlp_result" in st.session_state:
         result = st.session_state["nlp_result"]
