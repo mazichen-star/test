@@ -861,7 +861,7 @@ if st.button("AI 智能清洗（识别表头/单位行/签名行）", key="ai_cl
                 "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
                 headers={"Authorization": f"Bearer {ARK_KEY}", "Content-Type": "application/json"},
                 json={
-                    "model": "doubao-pro-32k",
+                    "model": st.secrets.get("ARK_MODEL", "ep-20261018150154-bhx49"),
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                 },
