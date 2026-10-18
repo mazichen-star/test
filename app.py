@@ -134,6 +134,10 @@ def load_user_file(username, filename):
     return b
 
 
+def delete_user_file(username, filename):
+    r = requests.delete(f"{REST}/user_files?username=eq.{username}&filename=eq.{filename}",
+                       headers=HEADERS, timeout=15)
+    return r.status_code in (200, 204)
 
 
 # ============ 共享材料库 ============
@@ -453,6 +457,16 @@ with st.sidebar:
     if saved_names:
         none_label = "(none)" if EN else "（不加载）"
         chosen = st.selectbox(T["choose_saved"], [none_label] + saved_names)
+        with st.expander("管理文件", expanded=False):
+            for f in saved:
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.caption(f["filename"])
+                with c2:
+                    if st.button("删", key=f"delfile_{f['filename']}"):
+                        if delete_user_file(st.session_state["username"], f["filename"]):
+                            st.success("已删除")
+                            st.rerun()
     else:
         none_label = "(none)" if EN else "（不加载）"
         chosen = none_label
