@@ -837,11 +837,8 @@ if data_source is None:
     st.stop()
 
 st.caption(f"当前数据文件: **{data_source}**")
-st.subheader("数据预览")
-st.dataframe(df, use_container_width=True, height=400)
-st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可上下左右滚动查看全部）")
 
-# AI 智能清洗（优先 DeepSeek，兼容火山方舟）
+# AI 智能清洗（优先 DeepSeek，兼容火山方舟）—— 在渲染预览前处理
 _dk = st.secrets.get("DEEPSEEK_API_KEY", "") or _os.environ.get("DEEPSEEK_API_KEY", "")
 _ak = st.secrets.get("ARK_API_KEY", "") or _os.environ.get("ARK_API_KEY", "")
 AI_KEY = _dk or _ak
@@ -851,15 +848,17 @@ if _dk:
 else:
     AI_BASE = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
     AI_MODEL = st.secrets.get("ARK_MODEL", "") or _os.environ.get("ARK_MODEL", "ep-20261018150154-bhx49")
-if not AI_KEY:
-    st.caption("（在 Streamlit Secrets 配置 DEEPSEEK_API_KEY 后可使用 AI 清洗）")
-else:
-    _sig = hash(str(df.shape) + str(df.columns.tolist())[:200])
-    if "df_cleaned" not in st.session_state or st.session_state.get("_clean_sig") != _sig:
-        with st.spinner("AI 正在自动清洗表格结构..."):
-            try:
-                csv_text = df.to_csv(index=False)
-                prompt = f"""你是材料实验数据清洗助手。下面是一个 Excel 表格导出的 CSV 文本，可能包含：标题行、参数行（如"试样长度 10mm"）、真正的表头行、单位行（mm/MPa/N）、数据行、空行、尾部签名行。
+
+_sig = hash(str(df.shape) + str(df.columns.tolist())[:200])
+# 如果已经清洗过且签名匹配，直接用清洗后的数据
+if st.session_state.get("_clean_sig") == _sig and "df_cleaned" in st.session_state:
+    df = st.session_state["df_cleaned"]
+elif AI_KEY:
+    # 需要调用 AI 清洗
+    with st.spinner("AI 正在自动清洗表格结构..."):
+        try:
+            csv_text = df.to_csv(index=False)
+            prompt = f"""你是材料实验数据清洗助手。下面是一个 Excel 表格导出的 CSV 文本，可能包含：标题行、参数行（如"试样长度 10mm"）、真正的表头行、单位行（mm/MPa/N）、数据行、空行、尾部签名行。
 
 请：
 1. 识别真正的数据表头行
@@ -868,33 +867,34 @@ else:
 
 表格内容：
 {csv_text[:4000]}"""
-                r = requests.post(
-                    AI_BASE,
-                    headers={"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"},
-                    json={
-                        "model": AI_MODEL,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1,
-                    },
-                    timeout=60,
-                )
-                if r.status_code == 200:
-                    ai_text = r.json()["choices"][0]["message"]["content"].strip()
-                    if ai_text.startswith("```"):
-                        ai_text = ai_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-                    new_df = pd.read_csv(io.StringIO(ai_text))
-                    st.session_state["df_cleaned"] = new_df
-                    st.session_state["_clean_sig"] = _sig
-                    st.rerun()
-                else:
-                    st.caption(f"AI 清洗跳过({r.status_code})，使用原始数据")
-            except Exception as e:
-                st.caption(f"AI 清洗出错，使用原始数据: {e}")
+            r = requests.post(
+                AI_BASE,
+                headers={"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": AI_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                },
+                timeout=60,
+            )
+            if r.status_code == 200:
+                ai_text = r.json()["choices"][0]["message"]["content"].strip()
+                if ai_text.startswith("```"):
+                    ai_text = ai_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                new_df = pd.read_csv(io.StringIO(ai_text))
+                st.session_state["df_cleaned"] = new_df
+                st.session_state["_clean_sig"] = _sig
+                df = new_df
+            else:
+                st.caption(f"AI 清洗跳过({r.status_code})，使用原始数据")
+        except Exception as e:
+            st.caption(f"AI 清洗出错，使用原始数据: {e}")
+elif not AI_KEY:
+    st.caption("（在 Streamlit Secrets 配置 DEEPSEEK_API_KEY 后可使用 AI 清洗）")
 
-# 如果 AI 清洗过，用清洗后的 df
-if "df_cleaned" in st.session_state:
-    df = st.session_state["df_cleaned"]
-    st.caption("（已应用 AI 清洗后的数据）")
+st.subheader("数据预览")
+st.dataframe(df, use_container_width=True, height=400)
+st.write(f"数据形状: **{df.shape[0]} 行 × {df.shape[1]} 列**（表格可上下左右滚动查看全部）")
 
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 cat_cols = [c for c in df.columns if c not in numeric_cols]
