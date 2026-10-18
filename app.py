@@ -163,6 +163,12 @@ def add_material(formula, structure, properties, source, contributor, reference=
     r = requests.post(f"{REST}/material_library", headers=HEADERS, json=payload, timeout=15)
     return r.status_code in (200,201), r.text[:300]
 
+def delete_material(mat_id, username):
+    # 只能删自己录入的
+    r = requests.delete(f"{REST}/material_library?id=eq.{mat_id}&contributor=eq.{username}",
+                       headers=HEADERS, timeout=15)
+    return r.status_code in (200,204)
+
 def change_password(username, new_pw):
     requests.patch(f"{REST}/users?username=eq.{username}", headers=HEADERS,
                    json={"password_hash": hash_pw(new_pw)}, timeout=15)
@@ -520,6 +526,20 @@ with st.expander("共享材料库（用户共建，去重录入）", expanded=Fa
                     "录入者": m.get("contributor"),
                 })
             st.dataframe(rows, use_container_width=True, height=300)
+            my_mats = [m for m in mats if m.get("contributor") == st.session_state["username"]]
+            if my_mats:
+                st.caption("我录入的记录（可删除）：")
+                for m in my_mats:
+                    c1, c2 = st.columns([5, 1])
+                    with c1:
+                        st.write(f"#{m['id']}  {m['formula']}  ({m.get('source','')})")
+                    with c2:
+                        if st.button("删除", key=f"del_mat_{m['id']}"):
+                            if delete_material(m['id'], st.session_state["username"]):
+                                st.success("已删除")
+                                st.rerun()
+                            else:
+                                st.error("删除失败")
     with tab_add:
         c1, c2 = st.columns(2)
         with c1:
@@ -862,6 +882,7 @@ if run_btn:
         model = trained[best_name]
         model_name = best_name
     else:
+        cmp_df = None
         with st.spinner(f"正在训练 {model_name} ..."):
             model = build_model(model_name, n_estimators, gpr_kernel_name)
             model.fit(X_train_s, y_train)
@@ -1003,6 +1024,78 @@ if run_btn:
     buf.seek(0)
     st.download_button("下载含预测列的 Excel", buf, file_name="prediction_result.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # ============ 导出 Word 训练报告 ============
+    try:
+        from docx import Document
+        from docx.shared import Inches
+        have_docx = True
+    except Exception:
+        have_docx = False
+
+    if have_docx:
+        if st.button("导出训练报告 Word"):
+            with st.spinner("生成报告中..."):
+                doc = Document()
+                doc.add_heading("材料力学性能预测训练报告", 0)
+                doc.add_paragraph(f"目标性能：{target_col}")
+                doc.add_paragraph(f"生成时间：{pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}")
+
+                doc.add_heading("1. 数据概况", 1)
+                doc.add_paragraph(f"数据文件：{data_source}")
+                doc.add_paragraph(f"样本数：{df.shape[0]}，特征数：{len(feature_cols)}")
+                doc.add_paragraph(f"特征列：{', '.join(feature_cols)}")
+                doc.add_paragraph(f"测试集比例：{test_size}")
+
+                doc.add_heading("2. 模型与指标", 1)
+                doc.add_paragraph(f"模型：{model_name}")
+                doc.add_paragraph(f"R² = {r2:.4f}")
+                doc.add_paragraph(f"MAE = {mae:.4f}")
+                doc.add_paragraph(f"RMSE = {rmse:.4f}")
+                if cmp_df is not None:
+                    doc.add_paragraph("模型对比排名：")
+                    t = doc.add_table(rows=1, cols=3)
+                    t.rows[0].cells[0].text = "模型"
+                    t.rows[0].cells[1].text = "R²"
+                    t.rows[0].cells[2].text = "RMSE"
+                    for _, r in cmp_df.iterrows():
+                        row = t.add_row().cells
+                        row[0].text = str(r["模型"])
+                        row[1].text = f"{r['R2']:.4f}"
+                        row[2].text = f"{r['RMSE']:.4f}"
+
+                doc.add_heading("3. 预测 vs 真实", 1)
+                fig_r, ax_r = plt.subplots(figsize=(6, 5))
+                ax_r.scatter(y_test, y_pred, alpha=0.7)
+                lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
+                ax_r.plot(lims, lims, 'r--')
+                ax_r.set_xlabel("真实值")
+                ax_r.set_ylabel("预测值")
+                ax_r.set_title("Predicted vs True")
+                img_buf = io.BytesIO()
+                fig_r.savefig(img_buf, format='png', dpi=150, bbox_inches='tight')
+                img_buf.seek(0)
+                doc.add_picture(img_buf, width=Inches(5))
+                plt.close(fig_r)
+
+                doc.add_heading("4. 预测结果明细（前20条）", 1)
+                t2 = doc.add_table(rows=1, cols=3)
+                t2.rows[0].cells[0].text = "真实值"
+                t2.rows[0].cells[1].text = "预测值"
+                t2.rows[0].cells[2].text = "误差"
+                for i in range(min(20, len(y_test))):
+                    row = t2.add_row().cells
+                    row[0].text = f"{y_test.iloc[i]:.4f}"
+                    row[1].text = f"{y_pred[i]:.4f}"
+                    row[2].text = f"{y_test.iloc[i]-y_pred[i]:.4f}"
+
+                out = io.BytesIO()
+                doc.save(out)
+                out.seek(0)
+                st.download_button("下载报告.docx", out, file_name="training_report.docx",
+                                   mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    else:
+        st.caption("（安装 python-docx 后可导出 Word 报告）")
 
     st.session_state["model"] = model
     st.session_state["model_name"] = model_name
