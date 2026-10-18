@@ -463,7 +463,7 @@ with st.sidebar:
                 with c1:
                     st.caption(f["filename"])
                 with c2:
-                    if st.button("删", key=f"delfile_{f['filename']}"):
+                    if st.button("删", key=f"delfile_{f['id']}"):
                         if delete_user_file(st.session_state["username"], f["filename"]):
                             st.success("已删除")
                             st.rerun()
