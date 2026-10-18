@@ -27,7 +27,7 @@ class StorageError(RuntimeError):
 
 
 def _b64encode(content: bytes) -> str:
-    return base64.b64encode(content).decode("ascii")
+    return "\x" + content.hex()
 
 
 def _b64decode(value: Any) -> bytes:
