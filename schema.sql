@@ -97,6 +97,16 @@ create table if not exists public.adhesion_experiments (
 create index if not exists idx_adhesion_exp_user
     on public.adhesion_experiments (username, id asc);
 
+-- 让 PostgREST 的 anon/authenticated 角色能够读写这两张表。
+-- 注意：当前应用使用自定义登录 + anon key，RLS 无法据此区分终端用户。
+grant select, insert, update, delete
+    on table public.adhesion_literature to anon, authenticated;
+grant select, insert, update, delete
+    on table public.adhesion_experiments to anon, authenticated;
+
+-- 新建表后刷新 PostgREST schema cache，避免 PGRST205 / 404
+notify pgrst, 'reload schema';
+
 -- ===== 安全说明 =====
 -- 本应用使用自定义登录（username 随请求发送），RLS 无法据此区分终端用户。
 -- 如果部署到公网，建议改用 Supabase Auth，或把数据库访问放到自己的后端 API 中，
