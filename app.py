@@ -2634,6 +2634,20 @@ def render_adhesion_modeling(target_unit: str) -> None:
 
 
 def render_adhesion_tab() -> None:
+    # Streamlit Cloud 热更新有时只重跑 app.py，不会重新导入 core.storage。
+    # 这时会出现 'SupabaseStorage' object has no attribute 'list_adhesion_literature'。
+    if not hasattr(STORAGE, "list_adhesion_literature"):
+        st.error(
+            tr(
+                "当前运行进程仍在加载旧版 core/storage.py（缺少黏附数据库方法）。"
+                "请在 Streamlit Cloud 的 Manage app 中点击 Reboot app，"
+                "或重新部署最新 main 分支。",
+                "The running process still has an old core/storage.py. "
+                "Use Manage app → Reboot app, or redeploy the latest main branch.",
+            )
+        )
+        return
+
     st.header(tr("PAA-DA 黏附性能：文献 + 小样本预测", "PAA-DA adhesion: literature + prediction"))
     st.caption(
         tr(
