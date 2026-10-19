@@ -58,7 +58,7 @@ except Exception:
 
 # ============ 页面与字体 ============
 st.set_page_config(
-    page_title="材料力学性能预测系统",
+    page_title="Materia · 力学性能工作台",
     page_icon="🧪",
     layout="wide",
 )
@@ -84,6 +84,21 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 
 
 # ============ 多语言与主题 ============
+st.sidebar.markdown(
+    """
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="4" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M8.5 22.5 16 8.5l7.5 14M11.5 17.5h9" stroke="currentColor" stroke-width="1.4"/>
+      </svg>
+      <div>
+        <div class="brand-name">Materia</div>
+        <div class="brand-sub">材料研发工作台</div>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 LANGS = ["中文", "English"]
 if "ui_lang" not in st.session_state:
     st.session_state["ui_lang"] = "中文"
@@ -100,62 +115,382 @@ def tr(zh: str, en: str) -> str:
     return en if EN else zh
 
 
-if "dark_mode" not in st.session_state:
-    st.session_state["dark_mode"] = False
-st.session_state["dark_mode"] = st.sidebar.toggle(
-    tr("暗色模式", "Dark mode"),
-    value=st.session_state["dark_mode"],
-    key="dark_toggle",
-)
-
-DARK_CSS = """
+BASE_CSS = """
 <style>
-.stApp { background-color: #0e1117; color: #e6e6e6; }
-[data-testid="stSidebar"] { background-color: #1a1d24; }
-h1, h2, h3, h4, p, label { color: #e6e6e6; }
-input, textarea, [data-baseweb="select"] > div {
-    background-color: #262932 !important;
-    color: #e6e6e6 !important;
-    border-color: #4a4d55 !important;
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap');
+
+:root {
+    --ground: #edf1ef;
+    --paper: #fbfcfb;
+    --ink: #17201e;
+    --muted: #5d6a66;
+    --line: #d5ddda;
+    --line-strong: #b6c1bd;
+    --tone-1: #f3f6f4;
+    --tone-2: #e5ebe8;
+    --accent: #0f5c5e;
+    --accent-soft: #d9e7e4;
+    --danger: #9d3c32;
+    --radius: 4px;
+    --font-sans: "IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+    --font-display: "IBM Plex Serif", "Noto Serif SC", "Songti SC", "SimSun", Georgia, serif;
 }
-.stButton > button {
-    background-color: #262932;
-    color: #e6e6e6;
-    border-color: #4a4d55;
+
+html, body, [data-testid="stAppViewContainer"], .stApp {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans) !important;
+    color-scheme: light;
 }
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+input, textarea, button, select {
+    font-family: var(--font-sans) !important;
+}
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stMain"] { background: var(--paper); }
+[data-testid="stHeader"] { background: transparent; }
+[data-testid="stDecoration"] { display: none; }
+[data-testid="stMainBlockContainer"] {
+    max-width: 1660px;
+    padding: 2.2rem clamp(1.2rem, 2.8vw, 2.8rem) 4rem;
+}
+[data-testid="stSidebar"] {
+    background: var(--ground);
+    min-width: 300px;
+    max-width: 330px;
+}
+[data-testid="stSidebar"] > div:first-child { padding-top: 1.35rem; }
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: .55rem; }
+
+h1, h2, h3, h4 {
+    font-family: var(--font-display) !important;
+    color: var(--ink);
+    letter-spacing: -.015em;
+    font-weight: 500;
+}
+h2, h3 { font-weight: 600; }
+h1 { font-size: clamp(2rem, 2.4vw, 2.7rem); line-height: 1.08; margin: 0 0 .35rem; }
+h2 { font-size: clamp(1.35rem, 1.6vw, 1.75rem); line-height: 1.18; margin: 1.6rem 0 .5rem; }
+h3 { font-size: 1.15rem; margin: 1.1rem 0 .35rem; }
+p, li, [data-testid="stMarkdownContainer"] p { color: var(--ink); line-height: 1.55; }
+[data-testid="stCaptionContainer"] p,
+[data-testid="stMarkdownContainer"] small { color: var(--muted); font-size: 11px; }
+label, [data-testid="stWidgetLabel"] p { color: var(--muted); font-size: 12px; font-weight: 500; }
+
+/* Shell */
+.masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 2rem;
+    padding: .35rem 0 1.7rem;
+}
+.masthead h1 { max-width: 15ch; }
+.masthead p {
+    max-width: 58ch;
+    margin: .55rem 0 0;
+    color: var(--muted);
+    font-size: 15px;
+}
+.status-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .45rem;
+    padding-bottom: .25rem;
+}
+.status-chip {
+    background: var(--tone-2);
+    color: var(--ink);
+    padding: 5px 9px;
+    font-size: 11px;
+    line-height: 1;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.status-chip.quiet { background: var(--tone-1); color: var(--muted); }
+
+.brand { display: flex; align-items: center; gap: 10px; padding: .1rem 0 1.2rem; }
+.brand-mark { width: 30px; height: 30px; flex: 0 0 30px; color: var(--accent); }
+.brand-name { font-family: var(--font-display); font-size: 20px; line-height: 1; letter-spacing: -.01em; }
+.brand-sub { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.side-section {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    margin: 1.35rem 0 .35rem;
+}
+.side-space { height: .8rem; }
+.side-user { display: flex; align-items: center; gap: 10px; padding: .55rem 0 .3rem; }
+.avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 12px; font-weight: 600;
+}
+.side-user strong { display: block; font-size: 13px; line-height: 1.2; }
+.side-user span { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+.data-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: .2rem 0 .45rem;
+    color: var(--muted);
+    font-size: 11px;
+}
+.data-line strong { color: var(--ink); font-weight: 500; font-size: 12px; }
+.empty-state {
+    max-width: 820px;
+    margin-top: 1.4rem;
+    padding: 2rem 2.2rem;
+    background: var(--tone-1);
+    border-radius: var(--radius);
+}
+.empty-state h2 { margin: 0 0 .55rem; font-size: 1.6rem; }
+.empty-state p { margin: 0; max-width: 62ch; color: var(--muted); font-size: 14px; }
+.empty-points {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.4rem;
+    margin-top: 1.6rem;
+}
+.empty-points div { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.empty-points strong {
+    display: block;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: .25rem;
+}
+
+.auth-aside {
+    background: var(--tone-1);
+    border-radius: var(--radius);
+    padding: 2rem 2rem 1.6rem;
+    position: sticky;
+    top: 1.5rem;
+}
+.auth-aside h2 {
+    margin: 0 0 .7rem;
+    font-size: 1.55rem;
+    line-height: 1.2;
+    max-width: 16ch;
+}
+.auth-aside p {
+    margin: 0 0 1.7rem;
+    color: var(--muted);
+    font-size: 13px;
+    max-width: 38ch;
+}
+.aside-item { margin: 1.25rem 0; }
+.aside-item strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: .2rem;
+}
+.aside-item span {
+    display: block;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted);
+}
+.aside-note {
+    margin-top: 1.8rem;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+/* Navigation */
+[data-testid="stTabs"] > div > div[role="tablist"] {
+    gap: 2px;
+    background: transparent;
+    border-bottom: 0;
+    padding: 0;
+    margin-bottom: 1.15rem;
+}
+[data-testid="stTabs"] [data-testid="stTab"] {
+    height: auto;
+    padding: 9px 14px;
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+}
+[data-testid="stTabs"] [data-testid="stTab"] p {
+    color: inherit;
+    font-family: var(--font-sans) !important;
+}
+[data-testid="stTabs"] [data-testid="stTab"]:hover {
+    background: var(--tone-2);
+    color: var(--ink);
+}
+[data-testid="stTabs"] [data-testid="stTab"][aria-selected="true"] {
+    background: var(--ink);
+    color: var(--paper);
+}
+[data-testid="stTabs"] .react-aria-SelectionIndicator { display: none; }
+[data-testid="stTabs"] [data-testid="stTabs"] [data-testid="stTab"] {
+    font-size: 12px;
+    padding: 7px 11px;
+    color: var(--muted);
+}
+[data-testid="stTabs"] [data-testid="stTabs"] [data-testid="stTab"][aria-selected="true"] {
+    background: var(--tone-2);
+    color: var(--ink);
+}
+
+/* Controls */
+.stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button {
+    min-height: 2.15rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 500;
+    box-shadow: none;
+}
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+.stFormSubmitButton > button:hover {
+    border-color: var(--ink);
+    background: var(--tone-2);
+    color: var(--ink);
+}
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"],
+.stDownloadButton > button[kind="primary"] {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+}
+.stButton > button[kind="primary"]:hover,
+.stFormSubmitButton > button[kind="primary"]:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+[data-testid="stSidebar"] .stButton > button { width: 100%; text-align: left; }
+
+input, textarea,
+[data-baseweb="input"],
+[data-baseweb="select"] > div,
+[data-baseweb="base-input"] {
+    background: var(--paper) !important;
+    color: var(--ink) !important;
+    border-color: var(--line) !important;
+    border-radius: var(--radius) !important;
+    box-shadow: none !important;
+}
+input:focus, textarea:focus,
+[data-baseweb="input"]:focus-within,
+[data-baseweb="select"] > div:focus-within {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 1px var(--accent) !important;
+}
+[data-baseweb="select"] [data-testid="stMarkdownContainer"] p { color: var(--ink) !important; }
+[data-testid="stNumberInput"] button { background: var(--tone-1); color: var(--ink); border-color: var(--line); }
+
+[data-testid="stMetric"] {
+    background: transparent;
+    padding: 0 1.2rem 0 0;
+    border-radius: 0;
+}
+[data-testid="stMetricLabel"] p { color: var(--muted); font-size: 11px; }
+[data-testid="stMetricValue"] {
+    font-family: var(--font-display);
+    color: var(--ink);
+    font-size: 30px;
+    line-height: 1.2;
+}
+[data-testid="stMetricDelta"] { font-size: 11px; }
+
+[data-testid="stExpander"] {
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--tone-1);
+    overflow: hidden;
+}
+[data-testid="stExpander"] details { border: 0; }
+[data-testid="stExpander"] summary {
+    padding: .65rem .8rem;
+    font-weight: 500;
+    color: var(--ink);
+}
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding: 0 .8rem .8rem; }
+
+[data-testid="stForm"] {
+    background: var(--tone-1);
+    padding: 1rem 1.1rem;
+    border-radius: var(--radius);
+    border: 0;
+}
+
 [data-testid="stFileUploaderDropzone"] {
-    background-color: #262932 !important;
-    border-color: #4a4d55 !important;
+    background: var(--tone-1) !important;
+    border: 1px solid var(--line-strong) !important;
+    border-radius: var(--radius) !important;
+    padding: 1.1rem !important;
 }
-[data-testid="stFileUploaderDropzone"] * { color: #e6e6e6 !important; }
-hr { border-color: #4a4d55; }
-</style>
-"""
+[data-testid="stFileUploaderDropzone"] * { color: var(--ink) !important; }
+[data-testid="stFileUploaderDropzone"] small { color: var(--muted) !important; }
 
-LIGHT_CSS = """
-<style>
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    overflow: hidden;
+}
+[data-testid="stAlert"] {
+    border: 0 !important;
+    border-radius: var(--radius) !important;
+    background: var(--tone-1) !important;
+    color: var(--ink) !important;
+}
+[data-testid="stAlert"] p { color: var(--ink) !important; }
+[data-testid="stAlert"] svg { color: var(--accent); }
+[data-testid="stButton"] button p,
+[data-testid="stButton"] button span,
+[data-testid="stFormSubmitButton"] button p,
+[data-testid="stFormSubmitButton"] button span,
+[data-testid="stDownloadButton"] button p,
+[data-testid="stDownloadButton"] button span,
+[data-testid="stFileUploaderDropzone"] button p {
+    color: inherit !important;
+}
+
+hr { border: 0; height: 18px; background: transparent; margin: 0; }
+[data-testid="stSlider"] [data-baseweb="slider"] { padding-top: .2rem; }
+[data-testid="stCheckbox"] label p, [data-testid="stRadio"] label p { color: var(--ink); }
+[data-testid="stCode"] { border-radius: var(--radius); }
+
 .stPlot, [data-testid="stImage"] { display: flex; justify-content: center; }
 .stPlot img, [data-testid="stImage"] img { margin: auto; max-width: 100%; height: auto; }
+
+@media (max-width: 900px) {
+    [data-testid="stMainBlockContainer"] { padding-top: 1.4rem; }
+    .masthead { display: block; }
+    .masthead h1 { max-width: none; }
+    .status-row { justify-content: flex-start; padding-top: .9rem; }
+    .masthead p { font-size: 14px; }
+}
 @media (max-width: 768px) {
-    h1 { font-size: 1.6rem !important; }
-    h2, h3 { font-size: 1.2rem !important; }
+    h2 { font-size: 1.25rem; }
     [data-testid="stHorizontalBlock"] { flex-direction: column; }
     [data-testid="stHorizontalBlock"] > div { width: 100% !important; }
+    [data-testid="stTabs"] [data-testid="stTab"] { padding: 8px 10px; font-size: 12px; }
 }
 </style>
 """
 
-st.markdown(DARK_CSS if st.session_state["dark_mode"] else LIGHT_CSS, unsafe_allow_html=True)
-
-st.title(tr("材料力学性能预测系统", "Mechanical Property Prediction"))
-st.markdown(
-    tr(
-        "上传 CSV / Excel 数据，训练回归模型，预测材料力学性能"
-        "（抗拉强度、屈服强度、弹性模量、延伸率等）。",
-        "Upload CSV/Excel, train regression models and predict mechanical "
-        "properties such as tensile strength, yield strength, modulus and elongation.",
-    )
-)
+st.markdown(BASE_CSS, unsafe_allow_html=True)
 
 # ============ 存储初始化 ============
 try:
@@ -163,6 +498,28 @@ try:
 except Exception as exc:
     st.error(f"存储初始化失败：{exc}")
     st.stop()
+
+_ai_key, _, _ai_model = ai_config()
+_ai_status = tr("AI 已接入", "AI connected") if _ai_key else tr("AI 未配置", "AI not configured")
+st.markdown(
+    f"""
+    <div class="masthead">
+      <div>
+        <h1>{tr("力学性能工作台", "Mechanical property workspace")}</h1>
+        <p>{tr(
+            "上传材料数据，比较模型，导出可复现的预测结果。",
+            "Upload material data, compare models, and export reproducible predictions.",
+        )}</p>
+      </div>
+      <div class="status-row">
+        <span class="status-chip">{storage_label()}</span>
+        <span class="status-chip{' quiet' if not _ai_key else ''}">{_ai_status}</span>
+        <span class="status-chip quiet">{tr("10 个回归模型", "10 regressors")}</span>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def set_flash(message: str, kind: str = "success") -> None:
@@ -249,15 +606,9 @@ def send_email(to_addr: str, subject: str, body: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def render_auth() -> None:
-    """登录 / 注册 / 找回密码。未登录时主页面不会继续执行。"""
+def _render_auth_forms() -> None:
+    """登录 / 注册 / 找回密码表单。"""
 
-    st.info(
-        tr(
-            "首次使用请先注册。数据默认保存在本地 SQLite；配置 Supabase 后自动切换为云数据库。",
-            "Register first. Data is stored in local SQLite by default; configure Supabase to use the cloud.",
-        )
-    )
     tab_login, tab_reg, tab_forgot = st.tabs(
         [tr("登录", "Login"), tr("注册", "Register"), tr("忘记密码", "Forgot password")]
     )
@@ -411,27 +762,70 @@ def render_auth() -> None:
                 # 不暴露邮箱是否注册
                 st.success(generic)
 
+
+def render_auth() -> None:
+    """登录页：左侧表单，右侧说明工作台能做什么。"""
+
+    left, right = st.columns([0.62, 0.38], gap="large")
+    with left:
+        _render_auth_forms()
+    with right:
+        st.markdown(
+            f"""
+            <aside class="auth-aside">
+              <h2>{tr("把实验数据变成可检查的预测。", "Turn lab data into predictions you can inspect.")}</h2>
+              <p>{tr(
+                  "一个面向材料研发的工作台：数据、模型和文献证据放在同一处，结果可导出、可复核。",
+                  "A workspace for materials R&D: data, models and literature evidence in one place.",
+              )}</p>
+              <div class="aside-item">
+                <strong>{tr("你的数据", "Your data")}</strong>
+                <span>{tr("上传 CSV / Excel，或从历史文件继续。", "Upload CSV / Excel or continue from a saved file.")}</span>
+              </div>
+              <div class="aside-item">
+                <strong>{tr("你的模型", "Your models")}</strong>
+                <span>{tr("从线性回归到 GPR，比较后选最优，并给出预测区间。", "From linear models to GPR, with prediction intervals.")}</span>
+              </div>
+              <div class="aside-item">
+                <strong>{tr("你的证据", "Your evidence")}</strong>
+                <span>{tr("文献提取、材料库、Excel 与 Word 报告都可追溯。", "Literature extraction, material library and exports.")}</span>
+              </div>
+              <div class="aside-note">{tr("当前存储", "Storage")} · {storage_label()}</div>
+            </aside>
+            """,
+            unsafe_allow_html=True,
+        )
     st.stop()
 
 
 def render_sidebar():
     with st.sidebar:
-        st.caption(
-            f"{tr('当前用户', 'User')}: **{st.session_state['username']}**"
+        username = st.session_state["username"]
+        initial = (username or "?")[0].upper()
+        st.markdown(
+            f"""
+            <div class="side-user">
+              <div class="avatar">{initial}</div>
+              <div>
+                <strong>{username}</strong>
+                <span>{storage_label()}</span>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        st.caption(f"{tr('存储', 'Storage')}: {storage_label()}")
-        if storage_label() == "本地 SQLite":
-            st.caption(
-                tr(
-                    "本地演示模式，数据保存在 data/app.db",
-                    "Local demo mode; data is stored in data/app.db",
-                )
-            )
         if st.button(tr("退出登录", "Log out"), use_container_width=True):
             clear_user_state()
             st.rerun()
 
-        with st.expander(tr("账号设置", "Account settings"), expanded=False):
+        with st.expander(tr("账号与存储", "Account & storage"), expanded=False):
+            if storage_label() == "本地 SQLite":
+                st.caption(
+                    tr(
+                        "当前为本地演示模式，数据保存在 data/app.db。",
+                        "Local demo mode; data is stored in data/app.db.",
+                    )
+                )
             current_pw = st.text_input(
                 tr("当前密码", "Current password"),
                 type="password",
@@ -469,7 +863,7 @@ def render_sidebar():
                     except StorageError as exc:
                         st.error(f"{tr('修改失败', 'Change failed')}：{exc}")
 
-            st.divider()
+            st.markdown('<div class="side-space"></div>', unsafe_allow_html=True)
             confirm_delete = st.checkbox(
                 tr("我确认删除账号及云端数据", "I confirm deleting my account"),
                 key="confirm_delete_account",
@@ -487,14 +881,20 @@ def render_sidebar():
                 except StorageError as exc:
                     st.error(f"{tr('删除失败', 'Delete failed')}：{exc}")
 
-        st.divider()
+        st.markdown(
+            f'<div class="side-section">{tr("数据文件", "Data file")}</div>',
+            unsafe_allow_html=True,
+        )
         uploaded_file = st.file_uploader(
             tr("上传数据文件", "Upload data file"),
             type=["csv", "xlsx", "xls"],
             key="data_upload",
         )
 
-        st.subheader(tr("我的数据文件", "My data files"))
+        st.markdown(
+            f'<div class="side-section">{tr("历史文件", "Saved files")}</div>',
+            unsafe_allow_html=True,
+        )
         none_label = tr("（不加载）", "(none)")
         try:
             saved_files = STORAGE.list_user_files(st.session_state["username"])
@@ -577,34 +977,41 @@ def render_library_tab() -> None:
             st.info(tr("库中暂无材料，去录入页添加第一条", "No materials yet."))
         else:
             rows = []
+            def dash(value):
+                return "—" if value is None or value == "" else value
+
             for material in materials:
                 props = material.get("properties") or {}
                 rows.append(
                     {
                         "ID": material.get("id"),
-                        tr("化学式/成分", "Formula"): material.get("formula"),
-                        tr("结构", "Structure"): material.get("structure"),
-                        tr("抗拉强度(MPa)", "Tensile (MPa)"): props.get(
+                        tr("化学式/成分", "Formula"): dash(material.get("formula")),
+                        tr("结构", "Structure"): dash(material.get("structure")),
+                        tr("抗拉强度(MPa)", "Tensile (MPa)"): dash(props.get(
                             "tensile_strength"
-                        ),
-                        tr("屈服强度(MPa)", "Yield (MPa)"): props.get(
+                        )),
+                        tr("屈服强度(MPa)", "Yield (MPa)"): dash(props.get(
                             "yield_strength"
-                        ),
-                        tr("杨氏模量(GPa)", "Modulus (GPa)"): props.get(
+                        )),
+                        tr("杨氏模量(GPa)", "Modulus (GPa)"): dash(props.get(
                             "youngs_modulus"
-                        ),
-                        tr("电导率(S/m)", "Conductivity (S/m)"): props.get(
+                        )),
+                        tr("电导率(S/m)", "Conductivity (S/m)"): dash(props.get(
                             "conductivity"
-                        ),
-                        tr("热导率(W/mK)", "Thermal cond. (W/mK)"): props.get(
+                        )),
+                        tr("热导率(W/mK)", "Thermal cond. (W/mK)"): dash(props.get(
                             "thermal_conductivity"
-                        ),
-                        tr("数据来源", "Source"): material.get("source"),
-                        tr("参考文献", "Reference"): material.get("reference"),
-                        tr("录入者", "Contributor"): material.get("contributor"),
+                        )),
+                        tr("数据来源", "Source"): dash(material.get("source")),
+                        tr("参考文献", "Reference"): dash(material.get("reference")),
+                        tr("录入者", "Contributor"): dash(material.get("contributor")),
                     }
                 )
-            st.dataframe(rows, use_container_width=True, height=320)
+            st.dataframe(
+                rows,
+                use_container_width=True,
+                height=max(120, min(380, 42 + 38 * len(rows))),
+            )
 
             mine = [
                 material
@@ -1210,7 +1617,7 @@ def render_compare_tab() -> None:
                 ax.bar(
                     [f"A: {material_a['formula']}", f"B: {material_b['formula']}"],
                     [value_a, value_b],
-                    color=["#4C9AFF", "#36B37E"],
+                    color=["#0f5c5e", "#6f8f6a"],
                 )
                 ax.set_title(f"{label} ({unit})", fontsize=10)
                 ax.tick_params(labelsize=8)
@@ -1326,7 +1733,7 @@ def plot_feature_curves(result: dict) -> None:
     for row_index, column in enumerate(shown):
         ax = axes[row_index][0]
         feature_index = feature_cols.index(column)
-        ax.scatter(X[:, feature_index], y, alpha=0.45, color="#4C9AFF", s=18, label=tr("样本", "Samples"))
+        ax.scatter(X[:, feature_index], y, alpha=0.45, color="#0f5c5e", s=18, label=tr("样本", "Samples"))
 
         if column in encoders:
             codes = np.unique(X[:, feature_index].astype(int))
@@ -1340,11 +1747,11 @@ def plot_feature_curves(result: dict) -> None:
                     prediction - 1.96 * std,
                     prediction + 1.96 * std,
                     alpha=0.18,
-                    color="#4C9AFF",
+                    color="#0f5c5e",
                 )
             else:
                 prediction = model.predict(grid_scaled)
-            ax.plot(codes, prediction, "o-", color="#B22222", label=tr("拟合", "Fit"))
+            ax.plot(codes, prediction, "o-", color="#9d3c32", label=tr("拟合", "Fit"))
             labels = list(encoders[column].classes_)
             ax.set_xticks(codes)
             ax.set_xticklabels(
@@ -1367,19 +1774,19 @@ def plot_feature_curves(result: dict) -> None:
                     prediction - 1.96 * std,
                     prediction + 1.96 * std,
                     alpha=0.18,
-                    color="#4C9AFF",
+                    color="#0f5c5e",
                 )
             else:
                 prediction = model.predict(grid_scaled)
-            ax.plot(xs, prediction, "-", color="#B22222", lw=1.8, label=tr("拟合", "Fit"))
+            ax.plot(xs, prediction, "-", color="#9d3c32", lw=1.8, label=tr("拟合", "Fit"))
             x_plot = xs
 
         if len(x_plot):
             maximum = int(np.argmax(prediction))
             minimum = int(np.argmin(prediction))
             for index, color, text, offset in [
-                (maximum, "#228B22", tr("最大", "Max"), 10),
-                (minimum, "#B22222", tr("最小", "Min"), -16),
+                (maximum, "#4f6b57", tr("最大", "Max"), 10),
+                (minimum, "#9d3c32", tr("最小", "Min"), -16),
             ]:
                 ax.scatter(
                     x_plot[index],
@@ -1444,7 +1851,7 @@ def render_results(result: dict) -> None:
     if importance is not None and len(importance):
         st.subheader(tr("特征重要性", "Feature importance"))
         fig, ax = plt.subplots(figsize=(8, max(2.2, 0.35 * len(importance))))
-        importance.plot.barh(ax=ax, color="#4C9AFF")
+        importance.plot.barh(ax=ax, color="#0f5c5e")
         ax.set_xlabel(tr("重要性", "Importance"), fontsize=8)
         ax.tick_params(labelsize=8)
         st.pyplot(fig)
@@ -1455,7 +1862,7 @@ def render_results(result: dict) -> None:
         st.subheader(tr("预测值 vs 真实值", "Predicted vs true"))
         fig, ax = plt.subplots(figsize=(5.2, 3.8))
         y_test, y_pred = result["y_test"], result["y_pred"]
-        ax.scatter(y_test, y_pred, alpha=0.7, color="#36B37E", s=22)
+        ax.scatter(y_test, y_pred, alpha=0.7, color="#6f8f6a", s=22)
         low = float(min(np.min(y_test), np.min(y_pred)))
         high = float(max(np.max(y_test), np.max(y_pred)))
         ax.plot([low, high], [low, high], "r--", lw=1.5)
@@ -1483,7 +1890,7 @@ def render_results(result: dict) -> None:
                 range(len(y_test)),
                 y_pred[order],
                 "-",
-                color="#4C9AFF",
+                color="#0f5c5e",
                 label=tr("预测均值", "Mean"),
                 lw=1.3,
             )
@@ -1492,7 +1899,7 @@ def render_results(result: dict) -> None:
                 y_pred[order] - 1.96 * y_std[order],
                 y_pred[order] + 1.96 * y_std[order],
                 alpha=0.22,
-                color="#4C9AFF",
+                color="#0f5c5e",
                 label=tr("95% 区间", "95% interval"),
             )
             ax.set_xlabel(tr("样本序号", "Sample"), fontsize=8)
@@ -1505,7 +1912,7 @@ def render_results(result: dict) -> None:
             st.subheader(tr("残差", "Residuals"))
             fig, ax = plt.subplots(figsize=(5.2, 3.8))
             residual = y_test - y_pred
-            ax.scatter(y_pred, residual, alpha=0.7, color="#FFAB00", s=22)
+            ax.scatter(y_pred, residual, alpha=0.7, color="#a8773e", s=22)
             ax.axhline(0, color="r", linestyle="--", lw=1)
             ax.set_xlabel(tr("预测值", "Predicted"), fontsize=8)
             ax.set_ylabel(tr("残差", "Residual"), fontsize=8)
@@ -1866,10 +2273,29 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
             return
 
     if content is None:
-        st.info(
+        st.markdown(
+            f"""
+            <div class="empty-state">
+              <h2>{tr("从一份数据表开始", "Start with a data table")}</h2>
+              <p>{tr(
+                  "上传记录成分、工艺与性能的 CSV / Excel，或从左侧加载历史文件。"
+                  "训练后会在这里看到指标、图表和新样本预测。",
+                  "Upload a CSV / Excel with composition, process and properties, "
+                  "or load a saved file. Metrics, charts and predictions appear here.",
+              )}</p>
+              <div class="empty-points">
+                <div><strong>{tr("目标列", "Target")}</strong>{tr("要预测的力学性能，如抗拉强度。", "The property to predict.")}</div>
+                <div><strong>{tr("特征列", "Features")}</strong>{tr("成分、工艺参数、组织结构等输入。", "Composition, process, structure.")}</div>
+                <div><strong>{tr("导出", "Export")}</strong>{tr("预测明细 Excel 与 Word 报告。", "Prediction Excel and Word report.")}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption(
             tr(
-                "请在左侧上传数据文件，或选择已保存的文件开始使用。",
-                "Upload a data file or choose a saved file in the sidebar.",
+                "支持 CSV / XLSX / XLS；首行为列名，每行一个样本。",
+                "CSV / XLSX / XLS supported; first row is the header.",
             )
         )
         return
@@ -1891,22 +2317,29 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
         st.session_state.pop("last_prediction", None)
         st.session_state.pop("bo_result", None)
 
-    st.caption(f"{tr('当前数据文件', 'Current file')}: **{data_source}**")
-    st.subheader(tr("数据预览", "Data preview"))
-    st.dataframe(df, use_container_width=True, height=380)
-    st.caption(
-        tr(
-            f"数据形状：{df.shape[0]} 行 × {df.shape[1]} 列",
-            f"Shape: {df.shape[0]} rows × {df.shape[1]} columns",
-        )
+    st.markdown(
+        f"""
+        <div class="data-line">
+          <span>{tr("数据集", "Dataset")}</span>
+          <strong>{data_source}</strong>
+          <span>{df.shape[0]} {tr("行", "rows")} · {df.shape[1]} {tr("列", "columns")}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+    with st.expander(
+        tr("查看数据表（前 20 行）", "View data table (first 20 rows)"),
+        expanded=False,
+    ):
+        st.dataframe(df.head(20), use_container_width=True, height=260)
 
     df, cleaned = apply_ai_cleaning(df)
     df = df.copy()
     data_signature = raw_signature + ("|ai=" + frame_signature(df) if cleaned else "")
     if cleaned:
         st.caption(tr("已使用 AI 清洗后的表格", "Using AI-cleaned table"))
-        st.dataframe(df.head(30), use_container_width=True, height=240)
+        with st.expander(tr("查看清洗后数据（前 20 行）", "View cleaned data")):
+            st.dataframe(df.head(20), use_container_width=True, height=240)
 
     columns = [str(column) for column in df.columns]
     df.columns = columns
@@ -2164,7 +2597,7 @@ def _plot_adhesion_importance(bundle: dict) -> None:
         importance = pd.Series(values, index=names).groupby(level=0).sum()
         importance = importance.sort_values(ascending=True)
         fig, ax = plt.subplots(figsize=(7, max(2.2, 0.32 * len(importance))))
-        importance.plot.barh(ax=ax, color="#36B37E")
+        importance.plot.barh(ax=ax, color="#6f8f6a")
         ax.set_title(tr("特征重要性", "Feature importance"))
         ax.tick_params(labelsize=8)
         st.pyplot(fig)
@@ -2174,22 +2607,13 @@ def _plot_adhesion_importance(bundle: dict) -> None:
 
 
 def render_adhesion_literature(target_unit: str) -> None:
-    st.subheader(tr("1. 文献数据（Supabase）", "1. Literature (Supabase)"))
+    st.subheader(tr("文献数据", "Literature"))
     st.caption(
         tr(
             "上传 PDF 后由 AI 抽取 PAA-DA 黏附数据，保存到 Supabase；所有数值都要人工核对。",
             "Upload PDFs, extract PAA-DA adhesion data with AI, and save to Supabase.",
         )
     )
-    if STORAGE.mode != "supabase":
-        st.warning(
-            tr(
-                "当前不是 Supabase 模式。线上请配置 SUPABASE_URL / SUPABASE_KEY；"
-                "本地 SQLite 仅用于调试，Streamlit Cloud 重启后会丢失。",
-                "Not in Supabase mode. Configure SUPABASE_URL / SUPABASE_KEY for production.",
-            )
-        )
-
     uploaded = st.file_uploader(
         tr("上传文献 PDF（可多选）", "Upload PDFs"),
         type=["pdf"],
@@ -2208,11 +2632,10 @@ def render_adhesion_literature(target_unit: str) -> None:
 
     ai_key, ai_base, ai_model = ai_config()
     if not ai_key:
-        st.info(
+        st.caption(
             tr(
-                "未配置 AI Key。可先在 Streamlit Secrets 配置 DEEPSEEK_API_KEY / "
-                "ARK_API_KEY，或使用下方手动 JSON。",
-                "No AI key configured. Add DEEPSEEK_API_KEY / ARK_API_KEY or use manual JSON.",
+                "未配置 AI Key，可手动粘贴 JSON；配置 DEEPSEEK_API_KEY / ARK_API_KEY 后启用 AI 抽取。",
+                "No AI key; use manual JSON or configure DEEPSEEK_API_KEY / ARK_API_KEY.",
             )
         )
     else:
@@ -2328,7 +2751,11 @@ def render_adhesion_literature(target_unit: str) -> None:
         ]
         if column in literature.columns
     ]
-    st.dataframe(literature[display_columns], use_container_width=True, height=320)
+    st.dataframe(
+        literature[display_columns],
+        use_container_width=True,
+        height=max(160, min(420, 42 + 36 * len(literature))),
+    )
     st.download_button(
         tr("下载文献数据 CSV", "Download CSV"),
         data=literature.to_csv(index=False).encode("utf-8-sig"),
@@ -2369,7 +2796,7 @@ def render_adhesion_literature(target_unit: str) -> None:
 
 
 def render_adhesion_experiments(target_unit: str) -> None:
-    st.subheader(tr("2. 实验数据（Supabase）", "2. Experiments (Supabase)"))
+    st.subheader(tr("实验数据", "Experiments"))
     st.caption(
         tr(
             "上传 30 条左右的实验数据，映射到标准字段后保存到 Supabase。",
@@ -2464,7 +2891,11 @@ def render_adhesion_experiments(target_unit: str) -> None:
         ]
         if column in experiments.columns
     ]
-    st.dataframe(experiments[display_columns], use_container_width=True, height=300)
+    st.dataframe(
+        experiments[display_columns],
+        use_container_width=True,
+        height=max(160, min(420, 42 + 36 * len(experiments))),
+    )
     if "adhesion_target" in experiments.columns:
         st.caption(
             tr(
@@ -2485,7 +2916,7 @@ def render_adhesion_experiments(target_unit: str) -> None:
 
 
 def render_adhesion_modeling(target_unit: str) -> None:
-    st.subheader(tr("3. 训练与预测", "3. Train and predict"))
+    st.subheader(tr("训练与预测", "Train and predict"))
     literature, experiments = _adhesion_dataframes()
     if experiments.empty:
         st.info(tr("请先保存实验数据", "Save experiments first"))
@@ -2604,7 +3035,7 @@ def render_adhesion_modeling(target_unit: str) -> None:
     left, right = st.columns(2)
     with left:
         fig, ax = plt.subplots(figsize=(5.2, 3.8))
-        ax.scatter(bundle["y_test"], bundle["y_pred"], alpha=0.75, color="#4C9AFF")
+        ax.scatter(bundle["y_test"], bundle["y_pred"], alpha=0.75, color="#0f5c5e")
         low = float(min(np.min(bundle["y_test"]), np.min(bundle["y_pred"])))
         high = float(max(np.max(bundle["y_test"]), np.max(bundle["y_pred"])))
         ax.plot([low, high], [low, high], "r--", lw=1.3)
@@ -2760,7 +3191,7 @@ def render_adhesion_tab() -> None:
         )
         return
 
-    st.header(tr("PAA-DA 黏附性能：文献 + 小样本预测", "PAA-DA adhesion: literature + prediction"))
+    st.subheader(tr("PAA-DA 黏附性能：文献 + 小样本预测", "PAA-DA adhesion: literature + prediction"))
     st.caption(
         tr(
             "文献和实验数据保存在 Supabase；AI 负责抽取和解释，模型负责数值预测。"
@@ -2787,9 +3218,9 @@ def render_adhesion_tab() -> None:
         )
     tab_lit, tab_exp, tab_model = st.tabs(
         [
-            tr("1 文献数据", "1 Literature"),
-            tr("2 实验数据", "2 Experiments"),
-            tr("3 训练与预测", "3 Train & predict"),
+            tr("文献数据", "Literature"),
+            tr("实验数据", "Experiments"),
+            tr("训练与预测", "Train & predict"),
         ]
     )
     with tab_lit:
@@ -2809,10 +3240,10 @@ def main() -> None:
 
     tab_model, tab_library, tab_compare, tab_adhesion = st.tabs(
         [
-            tr("数据建模", "Modeling"),
-            tr("共享材料库", "Material library"),
-            tr("材料对比", "Material comparison"),
-            tr("PAA-DA 黏附", "PAA-DA adhesion"),
+            tr("建模工作台", "Workspace"),
+            tr("材料库", "Library"),
+            tr("性能对比", "Compare"),
+            tr("PAA-DA 研究", "PAA-DA study"),
         ]
     )
     with tab_model:

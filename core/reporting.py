@@ -124,7 +124,7 @@ def make_word_report(
         if font_name:
             matplotlib.rcParams["font.sans-serif"] = [font_name, "DejaVu Sans"]
         matplotlib.rcParams["axes.unicode_minus"] = False
-        ax.scatter(y_test, y_pred, alpha=0.7, color="#4C9AFF")
+        ax.scatter(y_test, y_pred, alpha=0.7, color="#0f5c5e")
         low = float(min(np.min(y_test), np.min(y_pred)))
         high = float(max(np.max(y_test), np.max(y_pred)))
         ax.plot([low, high], [low, high], "r--", lw=1.5)
