@@ -559,7 +559,7 @@ def render_library_tab() -> None:
             tr("浏览/搜索", "Browse/Search"),
             tr("录入新材料", "Add material"),
             tr("批量导入", "Batch import"),
-            tr("文献NLP提取", "Literature extraction"),
+            tr("文献提取", "Literature extraction"),
         ]
     )
 
@@ -882,13 +882,125 @@ def render_library_tab() -> None:
         render_nlp_tab()
 
 
+def _ai_extract_material(
+    text: str, api_key: str, base_url: str, model: str
+) -> dict:
+    """用大模型从文献文本中提取单个材料记录。"""
+
+    prompt = f"""你是材料科学文献数据抽取助手。请从下面文本中提取一个材料性能记录。
+只输出 JSON 对象，不要解释，不要 markdown 代码块。
+
+字段：
+- formula: 化学式/成分/牌号（如 Al2O3、Ti6Al4V、304 stainless steel）
+- material_name: 文献中使用的材料名称
+- tensile: 抗拉强度 MPa，没有则 null
+- yield: 屈服强度 MPa，没有则 null
+- youngs: 杨氏模量 GPa，没有则 null
+- cond: 电导率 S/m，没有则 null
+- therm: 热导率 W/(m·K)，没有则 null
+- doi: DOI，没有则空字符串
+- page: 页码，没有则 null
+- quote: 支撑上述数值的原文短句（最多 100 字）
+- confidence: 0 到 1 的置信度
+
+规则：
+- 只提取文本中明确写出的数值，不要猜测。
+- 找不到的字段填 null。
+- 不要把不同材料/不同实验的数据合并。
+- 数值单位必须按上面字段统一。
+
+文献文本：
+{text[:8000]}"""
+
+    response = requests.post(
+        base_url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "你是材料学文献数据抽取助手，只输出合法 JSON。",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+        },
+        timeout=90,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"AI HTTP {response.status_code}: {response.text[:200]}")
+    content = response.json()["choices"][0]["message"]["content"].strip()
+    content = re.sub(r"^```(?:json)?", "", content).strip()
+    content = re.sub(r"```$", "", content).strip()
+    start = content.find("{")
+    end = content.rfind("}")
+    if start >= 0 and end > start:
+        content = content[start : end + 1]
+    data = json.loads(content)
+    if isinstance(data, dict) and isinstance(data.get("materials"), list) and data["materials"]:
+        data = data["materials"][0]
+    if isinstance(data, list) and data:
+        data = data[0]
+    if not isinstance(data, dict):
+        raise ValueError("AI 返回的不是 JSON 对象")
+
+    def number(key: str):
+        value = data.get(key)
+        if value in (None, "", "null"):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    page = data.get("page")
+    try:
+        page = int(float(page)) if page not in (None, "") else None
+    except (TypeError, ValueError):
+        page = None
+
+    return {
+        "formula": str(data.get("formula") or "").strip(),
+        "material_name": str(data.get("material_name") or "").strip(),
+        "tensile": number("tensile"),
+        "yield": number("yield"),
+        "youngs": number("youngs"),
+        "cond": number("cond"),
+        "therm": number("therm"),
+        "doi": str(data.get("doi") or "").strip(),
+        "page": page,
+        "quote": str(data.get("quote") or "")[:200],
+        "confidence": number("confidence"),
+    }
+
+
 def render_nlp_tab() -> None:
     st.caption(
         tr(
-            "粘贴文献文本或上传 PDF，按规则提取材料性能字段；结果需要人工确认。",
-            "Paste text or upload a PDF; fields are extracted by rules and must be reviewed.",
+            "上传 PDF 或粘贴文献文本，优先用 AI 提取材料性能字段，未配置 AI 时自动使用规则提取；结果需要人工确认。",
+            "Upload a PDF or paste text. AI extraction is used when configured, with a rule-based fallback.",
         )
     )
+    _ai_key, _ai_base, _ai_model = ai_config()
+    if _ai_key:
+        st.caption(
+            tr(
+                f"AI 已接入：{_ai_model or '未填写模型名'}；提取结果会保留原文引用，仍需人工确认。",
+                f"AI enabled: {_ai_model or 'model missing'}.",
+            )
+        )
+    else:
+        st.info(
+            tr(
+                "未配置 AI Key，当前使用规则提取。配置 DEEPSEEK_API_KEY / ARK_API_KEY 后会自动优先使用 AI。",
+                "No AI key; rule-based extraction is used. Configure DEEPSEEK_API_KEY / ARK_API_KEY to enable AI.",
+            )
+        )
+
     text = st.text_area(tr("文献文本", "Literature text"), height=180, key="nlp_text")
     pdf_file = st.file_uploader(
         tr("或上传 PDF", "Or upload a PDF"),
@@ -911,42 +1023,34 @@ def render_nlp_tab() -> None:
         if not text or len(text) < 20:
             st.warning(tr("文本太短", "Text is too short"))
         else:
-            _ai_key, _ai_base, _ai_model = ai_config()
             result = None
+            source = "规则提取"
             if _ai_key:
                 with st.spinner(tr("AI 正在提取文献数据...", "AI extracting...")):
                     try:
-                        prompt = f"""从下面材料科学文献文本中提取材料性能数据，返回JSON格式，不要解释。
-字段：
-- formula: 材料化学式/成分（如 Al2O3, Ti6Al4V, 304 stainless steel）
-- tensile: 抗拉强度(MPa)，没有则null
-- yield: 屈服强度(MPa)，没有则null
-- youngs: 杨氏模量(GPa)，没有则null
-- cond: 电导率(S/m)，没有则null
-- therm: 热导率(W/(m·K))，没有则null
-- doi: DOI号，没有则空字符串
-
-文献文本：
-{text[:4000]}"""
-                        r = requests.post(
-                            _ai_base,
-                            headers={"Authorization": f"Bearer {_ai_key}", "Content-Type": "application/json"},
-                            json={"model": _ai_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1},
-                            timeout=60,
-                        )
-                        if r.status_code == 200:
-                            import json as _json
-                            raw = r.json()["choices"][0]["message"]["content"].strip()
-                            if raw.startswith("```"):
-                                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-                            result = _json.loads(raw)
+                        result = _ai_extract_material(text, _ai_key, _ai_base, _ai_model)
+                        source = f"AI 提取（{_ai_model or '模型'}）"
                     except Exception as exc:
-                        st.caption(f"AI 提取失败，改用规则提取: {exc}")
+                        st.warning(f"AI 提取失败，改用规则提取：{exc}")
+
+            formula_pattern = re.compile(
+                r"\b((?:[A-Z][a-z]?\d*){2,}(?:[-–]\d+(?:\.\d+)?[A-Za-z]*)?)\b"
+            )
+            stop = {
+                "THE", "AND", "FOR", "ARE", "WITH", "FROM", "THIS", "THAT",
+                "FIG", "TABLE", "ALLOY", "STEEL", "SAMPLE",
+            }
+            formula_candidates = [
+                c
+                for c in formula_pattern.findall(text)
+                if len(c) >= 2 and c.upper() not in stop
+            ]
+
+            if result is not None and not result.get("formula") and formula_candidates:
+                result["formula"] = formula_candidates[0]
+
             if result is None:
                 # 正则 fallback
-                formula_pattern = re.compile(
-                    r"\b((?:[A-Z][a-z]?\d*){2,}(?:[-–]\d+(?:\.\d+)?[A-Za-z]*)?)\b"
-                )
                 def grab(keywords, unit_pattern):
                     keyword_pattern = re.compile("|".join(keywords), re.I)
                     value_pattern = re.compile(
@@ -964,22 +1068,30 @@ def render_nlp_tab() -> None:
                 conductivity = grab(["conductivity","电导率","导电率"], r"S\s*/\s*m")
                 thermal = grab(["thermal conductivity","热导率","导热"], r"W\s*/\s*(?:\(\s*m\s*[·*]?\s*K\s*\)|m\s*[·*]?\s*K)")
                 doi_match = re.search(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", text, re.I)
-                candidates = formula_pattern.findall(text)
-                stop = {"THE","AND","FOR","ARE","WITH","FROM","THIS","THAT","FIG","TABLE","ALLOY","STEEL","SAMPLE"}
-                candidates = [c for c in candidates if len(c) >= 2 and c.upper() not in stop]
                 result = {
-                    "formula": candidates[0] if candidates else "",
+                    "formula": formula_candidates[0] if formula_candidates else "",
+                    "material_name": "",
                     "tensile": tensile,
                     "yield": yield_strength,
                     "youngs": modulus,
                     "cond": conductivity,
                     "therm": thermal,
                     "doi": doi_match.group(0) if doi_match else "",
+                    "page": None,
+                    "quote": "",
+                    "confidence": None,
                 }
+                source = "规则提取"
+
+            result["_source"] = source
             st.session_state["nlp_result"] = result
+            st.session_state["nlp_extract_source"] = source
 
     if "nlp_result" in st.session_state:
         result = st.session_state["nlp_result"]
+        source = st.session_state.get("nlp_extract_source") or result.get("_source", "")
+        if source:
+            st.caption(tr(f"提取方式：{source}", f"Extraction: {source}"))
         st.write(tr("提取结果", "Extracted"))
         st.json(result)
         formula_edit = st.text_input(
