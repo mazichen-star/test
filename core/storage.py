@@ -122,6 +122,76 @@ class BaseStorage:
     def delete_material(self, material_id: Any, username: str) -> bool:
         raise NotImplementedError
 
+    # ---- PAA-DA 黏附：文献与实验数据 ----
+    def list_adhesion_literature(self, username: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def save_adhesion_literature(
+        self, rows: list[dict[str, Any]], username: str
+    ) -> int:
+        raise NotImplementedError
+
+    def delete_adhesion_literature(self, record_id: Any, username: str) -> bool:
+        raise NotImplementedError
+
+    def clear_adhesion_literature(self, username: str) -> None:
+        raise NotImplementedError
+
+    def list_adhesion_experiments(self, username: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def replace_adhesion_experiments(
+        self, username: str, rows: list[dict[str, Any]]
+    ) -> int:
+        raise NotImplementedError
+
+    def delete_adhesion_experiments(self, username: str) -> None:
+        raise NotImplementedError
+
+
+ADHESION_LITERATURE_COLUMNS = (
+    "username",
+    "source_file",
+    "title",
+    "doi",
+    "page",
+    "quote",
+    "material_system",
+    "dopamine_content",
+    "polymer_concentration",
+    "ph",
+    "curing_temp_c",
+    "curing_time_min",
+    "crosslinker",
+    "substrate",
+    "test_type",
+    "adhesion_value",
+    "adhesion_unit",
+    "adhesion_target",
+    "target_unit",
+    "test_temp_c",
+    "humidity",
+    "confidence",
+)
+
+ADHESION_EXPERIMENT_COLUMNS = (
+    "username",
+    "sample_id",
+    "dopamine_content",
+    "polymer_concentration",
+    "ph",
+    "curing_temp_c",
+    "curing_time_min",
+    "test_temp_c",
+    "humidity",
+    "crosslinker",
+    "substrate",
+    "test_type",
+    "adhesion_target",
+    "target_unit",
+    "source_type",
+)
+
 
 class SupabaseStorage(BaseStorage):
     mode = "supabase"
@@ -242,6 +312,16 @@ class SupabaseStorage(BaseStorage):
 
     def delete_account(self, username: str) -> None:
         self._request("DELETE", "user_files", params={"username": f"eq.{username}"})
+        self._request(
+            "DELETE",
+            "adhesion_literature",
+            params={"username": f"eq.{username}"},
+        )
+        self._request(
+            "DELETE",
+            "adhesion_experiments",
+            params={"username": f"eq.{username}"},
+        )
         self._request(
             "PATCH",
             "material_library",
@@ -400,6 +480,95 @@ class SupabaseStorage(BaseStorage):
         )
         return True
 
+    def list_adhesion_literature(self, username: str) -> list[dict[str, Any]]:
+        rows = self._request(
+            "GET",
+            "adhesion_literature",
+            params={
+                "username": f"eq.{username}",
+                "select": "*",
+                "order": "id.desc",
+            },
+        )
+        return rows if isinstance(rows, list) else []
+
+    def save_adhesion_literature(
+        self, rows: list[dict[str, Any]], username: str
+    ) -> int:
+        if not rows:
+            return 0
+        payload = []
+        for row in rows:
+            record = {column: row.get(column) for column in ADHESION_LITERATURE_COLUMNS}
+            record["username"] = username
+            payload.append(record)
+        result = self._request(
+            "POST",
+            "adhesion_literature",
+            json_body=payload,
+            headers={"Prefer": "return=representation"},
+            timeout=60,
+        )
+        return len(result) if isinstance(result, list) else len(payload)
+
+    def delete_adhesion_literature(self, record_id: Any, username: str) -> bool:
+        self._request(
+            "DELETE",
+            "adhesion_literature",
+            params={"id": f"eq.{record_id}", "username": f"eq.{username}"},
+        )
+        return True
+
+    def clear_adhesion_literature(self, username: str) -> None:
+        self._request(
+            "DELETE",
+            "adhesion_literature",
+            params={"username": f"eq.{username}"},
+        )
+
+    def list_adhesion_experiments(self, username: str) -> list[dict[str, Any]]:
+        rows = self._request(
+            "GET",
+            "adhesion_experiments",
+            params={
+                "username": f"eq.{username}",
+                "select": "*",
+                "order": "id.asc",
+            },
+        )
+        return rows if isinstance(rows, list) else []
+
+    def replace_adhesion_experiments(
+        self, username: str, rows: list[dict[str, Any]]
+    ) -> int:
+        self._request(
+            "DELETE",
+            "adhesion_experiments",
+            params={"username": f"eq.{username}"},
+        )
+        if not rows:
+            return 0
+        payload = []
+        for row in rows:
+            record = {column: row.get(column) for column in ADHESION_EXPERIMENT_COLUMNS}
+            record["username"] = username
+            payload.append(record)
+        result = self._request(
+            "POST",
+            "adhesion_experiments",
+            json_body=payload,
+            headers={"Prefer": "return=representation"},
+            timeout=60,
+        )
+        return len(result) if isinstance(result, list) else len(payload)
+
+    def delete_adhesion_experiments(self, username: str) -> None:
+        self._request(
+            "DELETE",
+            "adhesion_experiments",
+            params={"username": f"eq.{username}"},
+        )
+
 
 class SQLiteStorage(BaseStorage):
     mode = "sqlite"
@@ -450,6 +619,57 @@ class SQLiteStorage(BaseStorage):
                 );
                 CREATE INDEX IF NOT EXISTS idx_material_formula
                     ON material_library(formula);
+
+                CREATE TABLE IF NOT EXISTS adhesion_literature (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    source_file TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    doi TEXT NOT NULL DEFAULT '',
+                    page INTEGER,
+                    quote TEXT NOT NULL DEFAULT '',
+                    material_system TEXT NOT NULL DEFAULT 'PAA-DA',
+                    dopamine_content REAL,
+                    polymer_concentration REAL,
+                    ph REAL,
+                    curing_temp_c REAL,
+                    curing_time_min REAL,
+                    crosslinker TEXT NOT NULL DEFAULT '',
+                    substrate TEXT NOT NULL DEFAULT '',
+                    test_type TEXT NOT NULL DEFAULT 'unknown',
+                    adhesion_value REAL,
+                    adhesion_unit TEXT NOT NULL DEFAULT '',
+                    adhesion_target REAL,
+                    target_unit TEXT NOT NULL DEFAULT '',
+                    test_temp_c REAL,
+                    humidity REAL,
+                    confidence REAL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_adhesion_lit_user
+                    ON adhesion_literature(username, id DESC);
+
+                CREATE TABLE IF NOT EXISTS adhesion_experiments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    sample_id TEXT NOT NULL DEFAULT '',
+                    dopamine_content REAL,
+                    polymer_concentration REAL,
+                    ph REAL,
+                    curing_temp_c REAL,
+                    curing_time_min REAL,
+                    test_temp_c REAL,
+                    humidity REAL,
+                    crosslinker TEXT NOT NULL DEFAULT '',
+                    substrate TEXT NOT NULL DEFAULT '',
+                    test_type TEXT NOT NULL DEFAULT 'unknown',
+                    adhesion_target REAL,
+                    target_unit TEXT NOT NULL DEFAULT '',
+                    source_type TEXT NOT NULL DEFAULT 'experiment',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_adhesion_exp_user
+                    ON adhesion_experiments(username, id ASC);
                 """
             )
 
@@ -513,6 +733,12 @@ class SQLiteStorage(BaseStorage):
     def delete_account(self, username: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM user_files WHERE username = ?", (username,))
+            conn.execute(
+                "DELETE FROM adhesion_literature WHERE username = ?", (username,)
+            )
+            conn.execute(
+                "DELETE FROM adhesion_experiments WHERE username = ?", (username,)
+            )
             conn.execute(
                 "UPDATE material_library SET contributor = '已注销用户' "
                 "WHERE contributor = ?",
@@ -657,6 +883,88 @@ class SQLiteStorage(BaseStorage):
                 (material_id, username),
             )
             return cur.rowcount > 0
+
+    # ---- PAA-DA 黏附 ----
+    def list_adhesion_literature(self, username: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM adhesion_literature WHERE username = ? ORDER BY id DESC",
+                (username,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_adhesion_literature(
+        self, rows: list[dict[str, Any]], username: str
+    ) -> int:
+        if not rows:
+            return 0
+        with self._connect() as conn:
+            for row in rows:
+                record = {
+                    column: row.get(column) for column in ADHESION_LITERATURE_COLUMNS
+                }
+                record["username"] = username
+                values = [record.get(column) for column in ADHESION_LITERATURE_COLUMNS]
+                conn.execute(
+                    "INSERT INTO adhesion_literature("
+                    + ",".join(ADHESION_LITERATURE_COLUMNS)
+                    + ") VALUES ("
+                    + ",".join(["?"] * len(ADHESION_LITERATURE_COLUMNS))
+                    + ")",
+                    values,
+                )
+        return len(rows)
+
+    def delete_adhesion_literature(self, record_id: Any, username: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM adhesion_literature WHERE id = ? AND username = ?",
+                (record_id, username),
+            )
+            return cur.rowcount > 0
+
+    def clear_adhesion_literature(self, username: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM adhesion_literature WHERE username = ?", (username,)
+            )
+
+    def list_adhesion_experiments(self, username: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM adhesion_experiments WHERE username = ? ORDER BY id ASC",
+                (username,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def replace_adhesion_experiments(
+        self, username: str, rows: list[dict[str, Any]]
+    ) -> int:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM adhesion_experiments WHERE username = ?", (username,)
+            )
+            for row in rows:
+                record = {
+                    column: row.get(column) for column in ADHESION_EXPERIMENT_COLUMNS
+                }
+                record["username"] = username
+                values = [record.get(column) for column in ADHESION_EXPERIMENT_COLUMNS]
+                conn.execute(
+                    "INSERT INTO adhesion_experiments("
+                    + ",".join(ADHESION_EXPERIMENT_COLUMNS)
+                    + ") VALUES ("
+                    + ",".join(["?"] * len(ADHESION_EXPERIMENT_COLUMNS))
+                    + ")",
+                    values,
+                )
+        return len(rows)
+
+    def delete_adhesion_experiments(self, username: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM adhesion_experiments WHERE username = ?", (username,)
+            )
 
 
 _STORAGE: BaseStorage | None = None

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import secrets
@@ -25,6 +26,7 @@ import streamlit as st
 from matplotlib import font_manager
 from sklearn.gaussian_process import GaussianProcessRegressor
 
+from core import adhesion as adhesion_core
 from core.config import ai_config, get_secret, smtp_configured
 from core.data import (
     DataError,
@@ -169,6 +171,18 @@ def set_flash(message: str, kind: str = "success") -> None:
 
 def show_flash() -> None:
     item = st.session_state.pop("_flash", None)
+    if not item:
+        return
+    kind, message = item
+    getattr(st, kind, st.info)(message)
+
+
+def set_adhesion_flash(message: str, kind: str = "success") -> None:
+    st.session_state["_adhesion_flash"] = (kind, message)
+
+
+def show_adhesion_flash() -> None:
+    item = st.session_state.pop("_adhesion_flash", None)
     if not item:
         return
     kind, message = item
@@ -1955,6 +1969,711 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
     render_optimization(result)
 
 
+# ============ PAA-DA 黏附：正式版集成 ============
+def _native_records(frame: pd.DataFrame) -> list[dict]:
+    records = []
+    for record in frame.to_dict("records"):
+        clean = {}
+        for key, value in record.items():
+            if value is None:
+                clean[key] = None
+            elif isinstance(value, (np.integer,)):
+                clean[key] = int(value)
+            elif isinstance(value, (np.floating,)):
+                clean[key] = None if np.isnan(value) else float(value)
+            elif isinstance(value, float) and np.isnan(value):
+                clean[key] = None
+            else:
+                try:
+                    clean[key] = None if pd.isna(value) else value
+                except (TypeError, ValueError):
+                    clean[key] = value
+        records.append(clean)
+    return records
+
+
+def _adhesion_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
+    username = st.session_state["username"]
+    try:
+        literature_rows = STORAGE.list_adhesion_literature(username)
+        experiment_rows = STORAGE.list_adhesion_experiments(username)
+    except StorageError as exc:
+        st.error(f"{tr('读取黏附数据失败', 'Failed to load adhesion data')}：{exc}")
+        return pd.DataFrame(), pd.DataFrame()
+    literature = pd.DataFrame(literature_rows)
+    experiments = pd.DataFrame(experiment_rows)
+    return literature, experiments
+
+
+def _adhesion_similar(bundle: dict, literature: pd.DataFrame) -> pd.DataFrame:
+    if literature is None or literature.empty:
+        return pd.DataFrame()
+    fields = [field for field in bundle["numeric_features"] if field in literature.columns]
+    if not fields:
+        return pd.DataFrame()
+    base = literature.copy()
+    # Supabase/JSON 里的数值列可能是 object dtype，先强制转成 float
+    for field in fields:
+        base[field] = pd.to_numeric(base[field], errors="coerce")
+    base = base.dropna(subset=fields)
+    if base.empty:
+        return pd.DataFrame()
+    frame = bundle["frame"]
+    median = frame[fields].apply(pd.to_numeric, errors="coerce").median()
+    scale = (
+        frame[fields]
+        .apply(pd.to_numeric, errors="coerce")
+        .std()
+        .replace(0, 1)
+        .fillna(1)
+    )
+    distance = (
+        ((base[fields] - median) / scale).pow(2).sum(axis=1).pow(0.5)
+    )
+    base["_distance"] = pd.to_numeric(distance, errors="coerce")
+    base = base.dropna(subset=["_distance"])
+    return base.nsmallest(5, "_distance")
+
+
+def _plot_adhesion_importance(bundle: dict) -> None:
+    model = bundle["pipeline"].named_steps["model"]
+    preprocessor = bundle["pipeline"].named_steps["preprocessor"]
+    try:
+        names = [
+            name.split("__", 1)[-1]
+            for name in preprocessor.get_feature_names_out()
+        ]
+        if hasattr(model, "feature_importances_"):
+            values = model.feature_importances_
+        elif hasattr(model, "coef_"):
+            values = np.abs(np.asarray(model.coef_)).ravel()
+        else:
+            return
+        importance = pd.Series(values, index=names).groupby(level=0).sum()
+        importance = importance.sort_values(ascending=True)
+        fig, ax = plt.subplots(figsize=(7, max(2.2, 0.32 * len(importance))))
+        importance.plot.barh(ax=ax, color="#36B37E")
+        ax.set_title(tr("特征重要性", "Feature importance"))
+        ax.tick_params(labelsize=8)
+        st.pyplot(fig)
+        plt.close(fig)
+    except Exception:
+        return
+
+
+def render_adhesion_literature(target_unit: str) -> None:
+    st.subheader(tr("1. 文献数据（Supabase）", "1. Literature (Supabase)"))
+    st.caption(
+        tr(
+            "上传 PDF 后由 AI 抽取 PAA-DA 黏附数据，保存到 Supabase；所有数值都要人工核对。",
+            "Upload PDFs, extract PAA-DA adhesion data with AI, and save to Supabase.",
+        )
+    )
+    if STORAGE.mode != "supabase":
+        st.warning(
+            tr(
+                "当前不是 Supabase 模式。线上请配置 SUPABASE_URL / SUPABASE_KEY；"
+                "本地 SQLite 仅用于调试，Streamlit Cloud 重启后会丢失。",
+                "Not in Supabase mode. Configure SUPABASE_URL / SUPABASE_KEY for production.",
+            )
+        )
+
+    uploaded = st.file_uploader(
+        tr("上传文献 PDF（可多选）", "Upload PDFs"),
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="adhesion_pdf_upload",
+    )
+    pages_by_file: dict[str, list[dict]] = {}
+    if uploaded:
+        for pdf_file in uploaded:
+            try:
+                pages = adhesion_core.parse_pdf_bytes(pdf_file.getvalue())
+                pages_by_file[pdf_file.name] = pages
+                st.caption(f"{pdf_file.name}: {len(pages)} {tr('页', 'pages')}")
+            except Exception as exc:
+                st.error(f"{pdf_file.name}: {exc}")
+
+    ai_key, ai_base, ai_model = ai_config()
+    if not ai_key:
+        st.info(
+            tr(
+                "未配置 AI Key。可先在 Streamlit Secrets 配置 DEEPSEEK_API_KEY / "
+                "ARK_API_KEY，或使用下方手动 JSON。",
+                "No AI key configured. Add DEEPSEEK_API_KEY / ARK_API_KEY or use manual JSON.",
+            )
+        )
+    else:
+        st.caption(f"AI: {ai_model or tr('未填写模型', 'model missing')}")
+        if st.button(
+            tr("用 AI 抽取全部 PDF", "Extract all PDFs with AI"),
+            type="primary",
+            disabled=not pages_by_file,
+            key="adhesion_ai_extract",
+        ):
+            records: list[dict] = []
+            progress = st.progress(0.0, text=tr("准备抽取...", "Preparing..."))
+
+            def callback(index: int, total: int, page: int) -> None:
+                progress.progress(
+                    index / max(total, 1),
+                    text=tr(
+                        f"抽取第 {index}/{total} 段（第 {page} 页）...",
+                        f"Extracting {index}/{total} (page {page})...",
+                    ),
+                )
+
+            with st.spinner(tr("AI 正在阅读文献...", "AI reading...")):
+                for filename, pages in pages_by_file.items():
+                    try:
+                        records.extend(
+                            adhesion_core.extract_records_with_llm(
+                                pages,
+                                title=filename,
+                                doi="",
+                                target_unit=target_unit,
+                                api_key=ai_key,
+                                base_url=ai_base,
+                                model=ai_model,
+                                progress_cb=callback,
+                            )
+                        )
+                    except Exception as exc:
+                        st.error(f"{filename}: {exc}")
+            progress.empty()
+            if records:
+                try:
+                    count = STORAGE.save_adhesion_literature(
+                        records, st.session_state["username"]
+                    )
+                    set_adhesion_flash(
+                        tr(
+                            f"已保存 {count} 条文献记录到 Supabase，请核对",
+                            f"Saved {count} literature records to Supabase",
+                        )
+                    )
+                    st.rerun()
+                except StorageError as exc:
+                    st.error(f"{tr('保存失败', 'Save failed')}：{exc}")
+            else:
+                st.warning(tr("没有抽取到有效记录", "No valid records extracted"))
+
+    with st.expander(tr("手动粘贴 JSON", "Manual JSON"), expanded=False):
+        st.code(
+            json.dumps(
+                [
+                    {
+                        "title": "paper title",
+                        "doi": "10.xxxx/xxxx",
+                        "page": 3,
+                        "quote": "lap shear strength 42.5 kPa",
+                        "dopamine_content": 4.0,
+                        "polymer_concentration": 25.0,
+                        "ph": 6.0,
+                        "curing_temp_c": 60.0,
+                        "curing_time_min": 60.0,
+                        "crosslinker": "EDC/NHS",
+                        "substrate": "glass",
+                        "test_type": "lap_shear",
+                        "adhesion_value": 42.5,
+                        "adhesion_unit": "kPa",
+                        "test_temp_c": 25.0,
+                        "humidity": 50.0,
+                        "confidence": 0.9,
+                    }
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            language="json",
+        )
+        manual_json = st.text_area(
+            tr("粘贴记录数组", "Paste records"), height=220, key="adhesion_manual_json"
+        )
+        if st.button(tr("导入 JSON", "Import JSON"), key="adhesion_import_json"):
+            try:
+                records = adhesion_core.parse_records_json(manual_json, target_unit)
+                count = STORAGE.save_adhesion_literature(
+                    records, st.session_state["username"]
+                )
+                set_adhesion_flash(tr(f"导入 {count} 条", f"Imported {count}"))
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{tr('JSON 解析失败', 'JSON failed')}：{exc}")
+
+    literature, _ = _adhesion_dataframes()
+    st.subheader(tr("已保存的文献记录", "Saved literature"))
+    if literature.empty:
+        st.info(tr("还没有文献记录", "No literature records yet"))
+        return
+    display_columns = [
+        column
+        for column in [
+            "id", "title", "doi", "page", "test_type", "dopamine_content",
+            "polymer_concentration", "ph", "curing_temp_c", "curing_time_min",
+            "substrate", "adhesion_value", "adhesion_unit", "adhesion_target",
+            "target_unit", "confidence", "quote",
+        ]
+        if column in literature.columns
+    ]
+    st.dataframe(literature[display_columns], use_container_width=True, height=320)
+    st.download_button(
+        tr("下载文献数据 CSV", "Download CSV"),
+        data=literature.to_csv(index=False).encode("utf-8-sig"),
+        file_name="adhesion_literature.csv",
+        mime="text/csv",
+    )
+    delete_id = st.selectbox(
+        tr("删除一条记录", "Delete one"),
+        ["(不删除)"] + literature["id"].astype(int).tolist(),
+        key="adhesion_delete_record",
+    )
+    if delete_id != "(不删除)" and st.button(
+        tr("确认删除", "Delete"), key="adhesion_confirm_delete"
+    ):
+        try:
+            STORAGE.delete_adhesion_literature(
+                int(delete_id), st.session_state["username"]
+            )
+            set_adhesion_flash(tr("已删除", "Deleted"))
+            st.rerun()
+        except StorageError as exc:
+            st.error(f"{tr('删除失败', 'Delete failed')}：{exc}")
+    confirm_clear = st.checkbox(
+        tr("我确认清空全部文献记录", "Confirm clearing all literature"),
+        key="adhesion_clear_literature_confirm",
+    )
+    if st.button(
+        tr("清空文献记录", "Clear literature"),
+        disabled=not confirm_clear,
+        key="adhesion_clear_literature",
+    ):
+        try:
+            STORAGE.clear_adhesion_literature(st.session_state["username"])
+            set_adhesion_flash(tr("已清空", "Cleared"))
+            st.rerun()
+        except StorageError as exc:
+            st.error(f"{tr('清空失败', 'Clear failed')}：{exc}")
+
+
+def render_adhesion_experiments(target_unit: str) -> None:
+    st.subheader(tr("2. 实验数据（Supabase）", "2. Experiments (Supabase)"))
+    st.caption(
+        tr(
+            "上传 30 条左右的实验数据，映射到标准字段后保存到 Supabase。",
+            "Upload ~30 experiments, map columns and save to Supabase.",
+        )
+    )
+    uploaded = st.file_uploader(
+        tr("上传实验数据 CSV / Excel", "Upload CSV / Excel"),
+        type=["csv", "xlsx", "xls"],
+        key="adhesion_experiment_upload",
+    )
+    frame = None
+    if uploaded is not None:
+        try:
+            frame = adhesion_core.load_experiment_table(
+                uploaded.getvalue(), uploaded.name
+            )
+            st.success(f"{len(frame)} 行 × {len(frame.columns)} 列")
+            st.dataframe(frame, use_container_width=True, height=240)
+        except Exception as exc:
+            st.error(f"{tr('读取失败', 'Read failed')}：{exc}")
+
+    if frame is not None:
+        columns = [str(column) for column in frame.columns]
+        default_target = adhesion_core.guess_target(columns)
+        target_index = columns.index(default_target) if default_target in columns else 0
+        target_column = st.selectbox(
+            tr("目标列（黏附强度）", "Target column"),
+            columns,
+            index=target_index,
+            key="adhesion_target_column",
+        )
+        target_unit_in = st.selectbox(
+            tr("目标列原始单位", "Original unit"),
+            ["kPa", "MPa", "N/cm", "N/25mm", "gf/25mm", "N/mm"],
+            key="adhesion_target_unit_in",
+        )
+        mapping: dict[str, str | None] = {}
+        left, right = st.columns(2)
+        for index, field in enumerate(adhesion_core.ALL_FIELDS):
+            with (left if index % 2 == 0 else right):
+                default = adhesion_core.find_column(
+                    columns, adhesion_core.FIELD_ALIASES.get(field, [])
+                )
+                options = ["(不使用)"] + columns
+                value = st.selectbox(
+                    adhesion_core.FIELD_LABELS.get(field, field),
+                    options,
+                    index=options.index(default) if default in options else 0,
+                    key=f"adhesion_map_{field}",
+                )
+                mapping[field] = None if value == "(不使用)" else value
+
+        if st.button(
+            tr("保存实验数据到 Supabase", "Save experiments to Supabase"),
+            type="primary",
+            key="adhesion_save_experiments",
+        ):
+            try:
+                standardized = adhesion_core.standardize_experiments(
+                    frame, mapping, target_column, target_unit, target_unit_in
+                )
+                standardized = standardized[
+                    standardized[adhesion_core.TARGET_FIELD].notna()
+                ]
+                if not len(standardized):
+                    st.error(tr("没有可转换的目标值", "No convertible target values"))
+                else:
+                    rows = _native_records(standardized)
+                    count = STORAGE.replace_adhesion_experiments(
+                        st.session_state["username"], rows
+                    )
+                    set_adhesion_flash(
+                        tr(f"已保存 {count} 条实验数据", f"Saved {count} rows")
+                    )
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"{tr('保存失败', 'Save failed')}：{exc}")
+
+    _, experiments = _adhesion_dataframes()
+    st.subheader(tr("已保存的实验数据", "Saved experiments"))
+    if experiments.empty:
+        st.info(tr("还没有实验数据", "No experiments yet"))
+        return
+    display_columns = [
+        column
+        for column in [
+            "sample_id", "dopamine_content", "polymer_concentration", "ph",
+            "curing_temp_c", "curing_time_min", "test_temp_c", "humidity",
+            "crosslinker", "substrate", "test_type", "adhesion_target",
+            "target_unit",
+        ]
+        if column in experiments.columns
+    ]
+    st.dataframe(experiments[display_columns], use_container_width=True, height=300)
+    if "adhesion_target" in experiments.columns:
+        st.caption(
+            tr(
+                f"目标均值：{experiments['adhesion_target'].mean():.3f} {target_unit}",
+                f"Target mean: {experiments['adhesion_target'].mean():.3f} {target_unit}",
+            )
+        )
+    if st.button(
+        tr("删除我的全部实验数据", "Delete my experiments"),
+        key="adhesion_delete_experiments",
+    ):
+        try:
+            STORAGE.delete_adhesion_experiments(st.session_state["username"])
+            set_adhesion_flash(tr("已删除实验数据", "Experiments deleted"))
+            st.rerun()
+        except StorageError as exc:
+            st.error(f"{tr('删除失败', 'Delete failed')}：{exc}")
+
+
+def render_adhesion_modeling(target_unit: str) -> None:
+    st.subheader(tr("3. 训练与预测", "3. Train and predict"))
+    literature, experiments = _adhesion_dataframes()
+    if experiments.empty:
+        st.info(tr("请先保存实验数据", "Save experiments first"))
+        return
+    if "target_unit" in experiments.columns:
+        experiments = experiments[
+            experiments["target_unit"].fillna("") == target_unit
+        ]
+    if "target_unit" in literature.columns:
+        literature = literature[
+            literature["target_unit"].fillna("") == target_unit
+        ]
+    if experiments.empty:
+        st.warning(
+            tr(
+                f"没有 {target_unit} 单位的实验数据，请回实验页重新保存。",
+                f"No experiments in {target_unit}; re-save them.",
+            )
+        )
+        return
+
+    test_types = ["全部"]
+    for frame in (experiments, literature):
+        if "test_type" in frame.columns:
+            test_types.extend(
+                sorted(
+                    {
+                        str(value)
+                        for value in frame["test_type"].dropna().tolist()
+                        if str(value) not in ("", "unknown")
+                    }
+                )
+            )
+    test_types = list(dict.fromkeys(test_types))
+    default_type = "lap_shear" if "lap_shear" in test_types else test_types[0]
+    test_type = st.selectbox(
+        tr("测试类型", "Test type"),
+        test_types,
+        index=test_types.index(default_type),
+        key="adhesion_test_type",
+    )
+    if test_type == "全部":
+        st.warning(
+            tr(
+                "不同测试方法不要混在一起训练。",
+                "Do not mix different test methods.",
+            )
+        )
+    use_literature = st.checkbox(
+        tr("把文献数据加入训练集", "Use literature data"),
+        value=not literature.empty,
+        disabled=literature.empty,
+        key="adhesion_use_literature",
+    )
+    frame, numeric_features, categorical_features = adhesion_core.build_training_frame(
+        experiments, literature, target_unit, test_type, use_literature
+    )
+    if not len(frame):
+        st.warning(tr("没有可训练的数据", "No training data"))
+        return
+    st.caption(
+        tr(
+            f"训练样本：{len(frame)} 条（实验 "
+            f"{(frame['source_type'] == 'experiment').sum()}，文献 "
+            f"{(frame['source_type'] == 'literature').sum()}）",
+            f"Samples: {len(frame)}",
+        )
+    )
+    show_columns = list(
+        dict.fromkeys(
+            column
+            for column in [
+                "sample_id", "source_type", "test_type", "adhesion_target",
+                *numeric_features, *categorical_features,
+            ]
+            if column in frame.columns
+        )
+    )
+    st.dataframe(frame[show_columns], use_container_width=True, height=220)
+
+    model_name = st.selectbox(
+        tr("模型", "Model"),
+        ["高斯过程回归", "随机森林", "梯度提升树", "Ridge 回归"],
+        key="adhesion_model",
+    )
+    if st.button(
+        tr("开始训练", "Train"), type="primary", key="adhesion_train"
+    ):
+        try:
+            bundle = adhesion_core.train_adhesion_model(
+                frame,
+                numeric_features,
+                categorical_features,
+                model_name,
+                target_unit,
+                test_type,
+            )
+            st.session_state["adhesion_bundle"] = bundle
+            st.session_state.pop("adhesion_last_prediction", None)
+            st.session_state.pop("adhesion_ai_explanation", None)
+            st.success(tr("训练完成", "Trained"))
+        except Exception as exc:
+            st.error(f"{tr('训练失败', 'Training failed')}：{exc}")
+
+    bundle = st.session_state.get("adhesion_bundle")
+    if not bundle:
+        st.info(tr("点击“开始训练”后查看结果", "Train to see results"))
+        return
+    metrics = bundle["metrics"]
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("R²", fmt(metrics["r2"]))
+    col2.metric("MAE", fmt(metrics["mae"]))
+    col3.metric("RMSE", fmt(metrics["rmse"]))
+    col4.metric(tr("交叉验证 R²", "CV R²"), fmt(metrics["cv_r2"]))
+
+    left, right = st.columns(2)
+    with left:
+        fig, ax = plt.subplots(figsize=(5.2, 3.8))
+        ax.scatter(bundle["y_test"], bundle["y_pred"], alpha=0.75, color="#4C9AFF")
+        low = float(min(np.min(bundle["y_test"]), np.min(bundle["y_pred"])))
+        high = float(max(np.max(bundle["y_test"]), np.max(bundle["y_pred"])))
+        ax.plot([low, high], [low, high], "r--", lw=1.3)
+        ax.set_xlabel(tr("真实值", "True"))
+        ax.set_ylabel(tr("预测值", "Predicted"))
+        ax.set_title(tr("预测 vs 真实", "Predicted vs true"))
+        st.pyplot(fig)
+        plt.close(fig)
+    with right:
+        _plot_adhesion_importance(bundle)
+
+    st.subheader(tr("预测新配方", "Predict a new formulation"))
+    input_data = {}
+    columns = st.columns(min(len(bundle["features"]), 4))
+    frame = bundle["frame"]
+    for index, field in enumerate(bundle["features"]):
+        with columns[index % 4]:
+            if field in bundle["numeric_features"]:
+                default = (
+                    float(frame[field].median())
+                    if frame[field].notna().any()
+                    else 0.0
+                )
+                input_data[field] = st.number_input(
+                    adhesion_core.FIELD_LABELS.get(field, field),
+                    value=default,
+                    key=f"adhesion_predict_{field}",
+                )
+            else:
+                options = sorted(
+                    {str(value) for value in frame[field].dropna().tolist()}
+                ) or ["unknown"]
+                input_data[field] = st.selectbox(
+                    adhesion_core.FIELD_LABELS.get(field, field),
+                    options,
+                    key=f"adhesion_predict_{field}",
+                )
+    if st.button(tr("预测", "Predict"), key="adhesion_predict_btn"):
+        try:
+            prediction, std = adhesion_core.predict_bundle(
+                bundle, pd.DataFrame([input_data])
+            )
+            st.session_state["adhesion_last_prediction"] = {
+                "prediction": prediction,
+                "std": std,
+                "input": input_data,
+                "unit": bundle["target_unit"],
+            }
+            if std is not None:
+                st.success(
+                    tr(
+                        f"预测黏附强度：**{prediction:.3f} ± {1.96 * std:.3f} "
+                        f"{bundle['target_unit']}**（95% 预测区间）",
+                        f"Prediction: **{prediction:.3f} ± {1.96 * std:.3f} "
+                        f"{bundle['target_unit']}**",
+                    )
+                )
+            else:
+                st.success(
+                    tr(
+                        f"预测黏附强度：**{prediction:.3f} {bundle['target_unit']}**",
+                        f"Prediction: **{prediction:.3f} {bundle['target_unit']}**",
+                    )
+                )
+        except Exception as exc:
+            st.error(f"{tr('预测失败', 'Prediction failed')}：{exc}")
+
+    last = st.session_state.get("adhesion_last_prediction")
+    if last:
+        st.caption(
+            tr(
+                f"最近预测：{last['prediction']:.3f} {last['unit']}"
+                + (
+                    f" ± {1.96 * last['std']:.3f}"
+                    if last.get("std") is not None
+                    else ""
+                ),
+                f"Last prediction: {last['prediction']:.3f} {last['unit']}"
+                + (
+                    f" ± {1.96 * last['std']:.3f}"
+                    if last.get("std") is not None
+                    else ""
+                ),
+            )
+        )
+
+    similar = _adhesion_similar(bundle, literature)
+    if not similar.empty:
+        st.subheader(tr("最相似的文献记录", "Most similar literature"))
+        show = [
+            column
+            for column in [
+                "title", "doi", "page", "test_type", "adhesion_target", "quote",
+            ]
+            if column in similar.columns
+        ]
+        st.dataframe(similar[show], use_container_width=True, height=220)
+
+    ai_key, ai_base, ai_model = ai_config()
+    if ai_key and last:
+        if st.button(
+            tr("生成 AI 解释（带文献引用）", "AI explanation with citations"),
+            key="adhesion_ai_explain",
+        ):
+            context = ""
+            if not similar.empty:
+                for _, row in similar.iterrows():
+                    context += (
+                        f"- {row.get('title', '')} p.{row.get('page', '')}: "
+                        f"{row.get('quote', '')} | adhesion={row.get('adhesion_target', '')} "
+                        f"{row.get('target_unit', '')}\n"
+                    )
+            prompt = f"""你是材料学助手。只根据下面给出的预测结果和文献证据回答，
+不要编造文献，不要给出没有证据的精确数值。
+
+预测结果：{last['prediction']:.3f} {last['unit']}
+模型：{bundle['model_name']}
+测试类型：{bundle['test_type']}
+
+文献证据：
+{context or '（没有检索到相似文献）'}
+
+请用中文给出：
+1. 这个预测意味着什么；
+2. 哪些文献/因素支持它；
+3. 可信度和需要补充的实验。
+"""
+            try:
+                with st.spinner(tr("AI 解释中...", "Generating explanation...")):
+                    explanation = adhesion_core.call_llm(
+                        prompt, ai_key, ai_base, ai_model
+                    )
+                st.session_state["adhesion_ai_explanation"] = explanation
+            except Exception as exc:
+                st.error(f"{tr('AI 解释失败', 'AI explanation failed')}：{exc}")
+    explanation = st.session_state.get("adhesion_ai_explanation")
+    if explanation:
+        st.markdown(explanation)
+
+
+def render_adhesion_tab() -> None:
+    st.header(tr("PAA-DA 黏附性能：文献 + 小样本预测", "PAA-DA adhesion: literature + prediction"))
+    st.caption(
+        tr(
+            "文献和实验数据保存在 Supabase；AI 负责抽取和解释，模型负责数值预测。"
+            "不同测试方法（lap shear / peel / tack）请分开训练。",
+            "Literature and experiments are stored in Supabase. AI extracts/explanations; ML predicts.",
+        )
+    )
+    show_adhesion_flash()
+    target_unit = st.selectbox(
+        tr("黏附目标单位", "Adhesion target unit"),
+        ["kPa", "N/cm"],
+        key="adhesion_target_unit",
+        help=tr(
+            "lap shear 通常用 kPa；peel 通常用 N/cm。切换后请重新保存/抽取对应单位的数据。",
+            "lap shear usually kPa; peel usually N/cm.",
+        ),
+    )
+    if STORAGE.mode != "supabase":
+        st.warning(
+            tr(
+                "当前为本地 SQLite 调试模式；线上请配置 Supabase，否则 Streamlit Cloud 重启后数据会丢失。",
+                "Local SQLite debug mode; configure Supabase for production.",
+            )
+        )
+    tab_lit, tab_exp, tab_model = st.tabs(
+        [
+            tr("1 文献数据", "1 Literature"),
+            tr("2 实验数据", "2 Experiments"),
+            tr("3 训练与预测", "3 Train & predict"),
+        ]
+    )
+    with tab_lit:
+        render_adhesion_literature(target_unit)
+    with tab_exp:
+        render_adhesion_experiments(target_unit)
+    with tab_model:
+        render_adhesion_modeling(target_unit)
+
+
 # ============ 入口 ============
 def main() -> None:
     if not st.session_state.get("username"):
@@ -1962,11 +2681,12 @@ def main() -> None:
 
     uploaded_file, chosen_file = render_sidebar()
 
-    tab_model, tab_library, tab_compare = st.tabs(
+    tab_model, tab_library, tab_compare, tab_adhesion = st.tabs(
         [
             tr("数据建模", "Modeling"),
             tr("共享材料库", "Material library"),
             tr("材料对比", "Material comparison"),
+            tr("PAA-DA 黏附", "PAA-DA adhesion"),
         ]
     )
     with tab_model:
@@ -1975,6 +2695,8 @@ def main() -> None:
         render_library_tab()
     with tab_compare:
         render_compare_tab()
+    with tab_adhesion:
+        render_adhesion_tab()
 
 
 main()

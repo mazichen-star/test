@@ -17,8 +17,9 @@
 - **新样本预测**：留空数值用训练均值、未知类别用众数填充；预测结果在页面重跑后仍保留。
 - **贝叶斯优化**：基于训练模型搜索数值特征的最优组合，使用真实训练 min/max 作为搜索边界；未安装 `scikit-optimize` 时自动禁用。
 - **共享材料库**：按化学式搜索、录入、批量导入、文献正则提取、材料性能对比；删除只能删自己录入的记录。
+- **PAA-DA 黏附模块**：上传 PDF，由 AI 抽取聚丙烯酸-多巴胺的黏附数据；与实验数据一起训练 GPR/随机森林/梯度提升/Ridge，输出预测区间和相似文献；数据保存到 Supabase。
 - **账号系统**：注册、登录、改密、找回密码、删除账号；密码使用 PBKDF2-HMAC-SHA256 + 随机盐，兼容旧版 SHA-256 哈希并自动升级。
-- **存储**：有 Supabase 配置时用云数据库；没有配置时自动使用本地 SQLite，开箱即用。
+- **存储**：线上使用 Supabase；本地未配置 Supabase 时自动使用 SQLite 仅作调试，Streamlit Cloud 上请务必配置 Supabase。
 - **界面**：中英文切换、暗色模式、窄屏适配。
 
 ## 2. 本次完善的重点
@@ -55,9 +56,11 @@
 │   ├── storage.py                  # Supabase + SQLite 两套存储
 │   ├── data.py                     # 读取、表头识别、预处理、签名
 │   ├── modeling.py                 # 模型注册、训练、评估、CV
+│   ├── adhesion.py                 # PAA-DA 文献抽取、单位换算、小样本模型
 │   └── reporting.py                # Excel / Word 导出
 ├── tests/
-│   └── test_core.py                # 核心逻辑测试
+│   ├── test_core.py                # 核心逻辑测试
+│   └── test_adhesion.py            # 黏附模块测试
 ├── fonts/
 │   └── NotoSansSC-Regular.ttf      # 图表中文字体
 ├── schema.sql                      # Supabase 建表 SQL
@@ -116,7 +119,26 @@ SUPABASE_KEY = "your-anon-key"
 
 没有填写 Supabase 配置时，应用不会报错退出，而是自动使用本地 SQLite。
 
+`PAA-DA 黏附` 模块需要额外两张表，已经包含在 `schema.sql` 中：
+
+- `adhesion_literature`：AI 从 PDF 抽取的文献数据；
+- `adhesion_experiments`：标准化后的 30 条实验数据。
+
+如果 Supabase 里已经有旧表，重新执行一次 `schema.sql` 即可（`create table if not exists` 不会删除已有数据）。
+
 > 安全提示：当前架构是“自定义登录 + 请求里携带 username”，Supabase RLS 无法据此区分终端用户。公网部署建议改用 Supabase Auth，或把数据库访问放到自己的后端 API 中；不要在前端/Streamlit 中使用 `service_role` key。
+
+### 5.1 PAA-DA 黏附模块
+
+正式版新增顶级标签「PAA-DA 黏附」，分三个子页：
+
+1. **文献数据**：上传 PDF，AI 抽取 PAA-DA 黏附数据（多巴胺含量、浓度、pH、固化条件、基材、测试类型、黏附强度等），人工核对后保存到 `adhesion_literature`。
+2. **实验数据**：上传 CSV / Excel，映射目标列和标准字段，保存到 `adhesion_experiments`。
+3. **训练与预测**：文献 + 实验联合训练，GPR 输出 95% 预测区间，并列出最相似文献；配置 AI Key 后可生成带引用的解释。
+
+AI 配置与第 7 节相同（`DEEPSEEK_API_KEY` / `ARK_API_KEY`）。没有 AI Key 时仍可手动粘贴 JSON，并使用模型训练与预测。
+
+> 该模块的数据以 Supabase 为准；本地 SQLite 只在未配置 Supabase 时用于调试，Streamlit Cloud 重启后不会保留。
 
 ## 6. 邮件找回密码（可选）
 
@@ -174,21 +196,33 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-测试不依赖 Streamlit 或 Supabase，覆盖密码哈希、SQLite 存储、预处理、Excel 表头识别、模型训练和 Excel/Word 导出。
+测试不依赖 Streamlit 或 Supabase，覆盖密码哈希、SQLite 存储、预处理、Excel 表头识别、模型训练、Excel/Word 导出，以及 PAA-DA 的单位换算、实验标准化和小样本训练。
 
 ## 10. 部署
 
 ### Streamlit Community Cloud
 
-1. 把仓库推到 GitHub。
+1. 把仓库推到 GitHub 的 `main` 分支。
 2. 在 Streamlit Cloud 新建应用，入口选择 `app.py`。
-3. 在 Secrets 中粘贴与 `.streamlit/secrets.toml` 相同的配置。
+3. 在 Secrets 中至少配置：
+
+```toml
+SUPABASE_URL = "https://your-project.supabase.co"
+SUPABASE_KEY = "your-anon-key"
+
+# AI 文献抽取 / 解释（可选，但 PAA-DA 模块需要）
+DEEPSEEK_API_KEY = "sk-..."
+DEEPSEEK_MODEL = "deepseek-chat"
+```
+
+4. 在 Supabase SQL Editor 执行最新的 `schema.sql`，确保 `adhesion_literature`、`adhesion_experiments` 表存在。
+5. 推送 `main` 后，Streamlit Cloud 会自动重新部署；如果没更新，在控制台点 “Reboot app”。
 
 ### 其他平台（SealOS / Docker / 服务器）
 
 - 启动命令：`streamlit run app.py --server.address 0.0.0.0 --server.port 8501`
 - 通过环境变量注入 `SUPABASE_URL`、`SUPABASE_KEY`、`SMTP_*`、`DEEPSEEK_API_KEY` 等。
-- 如果使用本地 SQLite，确保 `data/` 目录可写并做持久化挂载。
+- PAA-DA 模块以 Supabase 为准；不要依赖容器本地 SQLite 持久化。
 
 ## 11. 已知限制
 
