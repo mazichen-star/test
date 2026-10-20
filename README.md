@@ -18,7 +18,7 @@
 - **贝叶斯优化**：基于训练模型搜索数值特征的最优组合，使用真实训练 min/max 作为搜索边界；未安装 `scikit-optimize` 时自动禁用。
 - **共享材料库**：按化学式搜索、录入、批量导入、文献正则提取、材料性能对比；删除只能删自己录入的记录。
 - **PAA-DA 黏附模块**：上传 PDF，由 AI 抽取聚丙烯酸-多巴胺的黏附数据；与实验数据一起训练 GPR/随机森林/梯度提升/Ridge，输出预测区间和相似文献；数据保存到 Supabase。
-- **账号系统**：注册、登录、改密、找回密码、删除账号；密码使用 PBKDF2-HMAC-SHA256 + 随机盐，兼容旧版 SHA-256 哈希并自动升级。
+- **账号系统**：Supabase 模式使用 **Supabase Auth + RLS**（邮箱登录、邮箱找回、JWT 绑定用户）；本地 SQLite 调试模式使用 PBKDF2-HMAC-SHA256 + 随机盐，兼容旧版 SHA-256 哈希。
 - **存储**：线上使用 Supabase；本地未配置 Supabase 时自动使用 SQLite 仅作调试，Streamlit Cloud 上请务必配置 Supabase。
 - **界面**：统一浅色实验室工作台主题、中英文切换、窄屏适配；表格与指标使用同一套字阶和留白。
 
@@ -44,6 +44,7 @@
 - 退出登录/删除账号会清除模型、数据和页面状态，避免下一个账号看到上一个账号的模型。
 - 交叉验证改为 `Pipeline(StandardScaler, model)`，避免先缩放造成数据泄漏；小样本自动减少折数或跳过。
 - 模型训练/预测/寻优都加了异常处理，错误以页面提示呈现。
+- Supabase 模式从“自建 users 表 + anon key”升级为 **Supabase Auth + RLS**：请求携带用户 JWT，RLS 用 `auth.uid()` 和 `profiles.username` 限制到本人；旧 `users` 表已锁死。
 
 ## 3. 项目结构
 
@@ -57,10 +58,12 @@
 │   ├── data.py                     # 读取、表头识别、预处理、签名
 │   ├── modeling.py                 # 模型注册、训练、评估、CV
 │   ├── adhesion.py                 # PAA-DA 文献抽取、单位换算、小样本模型
+│   ├── supabase_auth.py            # Supabase Auth 登录、刷新、找回、删号
 │   └── reporting.py                # Excel / Word 导出
 ├── tests/
 │   ├── test_core.py                # 核心逻辑测试
-│   └── test_adhesion.py            # 黏附模块测试
+│   ├── test_adhesion.py            # 黏附模块测试
+│   └── test_supabase_auth.py       # Auth / JWT 请求头测试
 ├── fonts/
 │   └── NotoSansSC-Regular.ttf      # 图表中文字体
 ├── schema.sql                      # Supabase 建表 SQL
@@ -68,6 +71,7 @@
 ├── requirements-optional.txt       # scikit-optimize（贝叶斯优化）
 ├── requirements-dev.txt            # pytest
 ├── .streamlit/
+│   ├── config.toml                 # 主题色与上传大小
 │   └── secrets.toml.example
 ├── README.md
 └── LICENSE
@@ -101,21 +105,22 @@ pip install -r requirements-optional.txt
 ## 5. 使用 Supabase（可选）
 
 1. 在 Supabase 创建项目。
-2. 打开 SQL Editor，执行 `schema.sql`。
-3. 复制配置模板：
+2. **Authentication → Providers** 启用 Email；按需关闭 “Confirm email” 方便首次试用。
+3. 打开 SQL Editor，执行 `schema.sql`。它会创建 `profiles`、Auth trigger、RLS 策略和 `delete_my_account()`。
+5. 复制配置模板：
 
 ```bash
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 ```
 
-4. 填写：
+6. 填写：
 
 ```toml
 SUPABASE_URL = "https://your-project.supabase.co"
 SUPABASE_KEY = "your-anon-key"
 ```
 
-5. 重启应用。页面侧边栏会显示“存储：Supabase 云数据库”。
+7. 重启应用。页面侧边栏会显示“存储：Supabase 云数据库”，登录页会变成邮箱登录。
 
 没有填写 Supabase 配置时，应用不会报错退出，而是自动使用本地 SQLite。
 
@@ -126,7 +131,26 @@ SUPABASE_KEY = "your-anon-key"
 
 如果 Supabase 里已经有旧表，重新执行一次 `schema.sql` 即可（`create table if not exists` 不会删除已有数据）。
 
-> 安全提示：当前架构是“自定义登录 + 请求里携带 username”，Supabase RLS 无法据此区分终端用户。公网部署建议改用 Supabase Auth，或把数据库访问放到自己的后端 API 中；不要在前端/Streamlit 中使用 `service_role` key。
+> 安全提示：Supabase 模式现在使用 Supabase Auth + RLS。`anon` 角色不再拥有业务表读写权限；所有查询都带用户 JWT，RLS 通过 `auth.uid()` 和 `profiles.username` 限制到本人。不要把 `service_role` key 放进 Streamlit 或浏览器。
+
+### 5.0 旧账号迁移
+
+旧的 `public.users` 表（用户名 + PBKDF2 密码）在云模式下不再用于登录，并且已对 `anon/authenticated` 锁死。
+
+迁移已有用户：
+
+1. Supabase Dashboard → **Authentication → Users → Add user**；
+2. 邮箱填旧账号的邮箱，密码设置一个新密码；
+3. User Metadata 填：
+
+```json
+{"username": "旧用户名"}
+```
+
+4. 保存后 trigger 会创建 `profiles`；
+5. 旧 `user_files`、`adhesion_literature`、`adhesion_experiments`、`material_library` 按 `username` 自动对上，无需搬数据。
+
+如果旧数据不需要保留，也可以让用户直接用同一用户名重新注册。
 
 ### 5.1 PAA-DA 黏附模块
 
@@ -140,9 +164,19 @@ AI 配置与第 7 节相同（`DEEPSEEK_API_KEY` / `ARK_API_KEY`）。没有 AI 
 
 > 该模块的数据以 Supabase 为准；本地 SQLite 只在未配置 Supabase 时用于调试，Streamlit Cloud 重启后不会保留。
 
-## 6. 邮件找回密码（可选）
+## 6. 找回密码
 
-在 `.streamlit/secrets.toml` 中配置：
+### Supabase 模式
+
+找回密码走 **Supabase Auth**：
+
+- 在 Supabase Dashboard → Authentication → Email 配置 SMTP；
+- 应用调用 `/auth/v1/recover`，由 Supabase 发送重置密码邮件；
+- 不需要在 Streamlit 里配置 `SMTP_*`，也不会生成临时密码。
+
+### 本地 SQLite 调试模式
+
+本地模式才使用自定义 SMTP：
 
 ```toml
 SMTP_HOST = "smtp.example.com"
@@ -155,7 +189,6 @@ SMTP_USE_SSL = true
 - 465 端口通常用 `SMTP_USE_SSL = true`。
 - 587 端口通常用 `SMTP_USE_SSL = false`（STARTTLS）。
 - 未配置 SMTP 时，“忘记密码”会禁用；页面不会输出临时密码。
-- 发送失败会回滚密码，并提示稍后重试或联系管理员。
 
 ## 7. AI 表格清洗（可选）
 
@@ -215,8 +248,9 @@ DEEPSEEK_API_KEY = "sk-..."
 DEEPSEEK_MODEL = "deepseek-chat"
 ```
 
-4. 在 Supabase SQL Editor 执行最新的 `schema.sql`，确保 `adhesion_literature`、`adhesion_experiments` 表存在。
-5. 推送 `main` 后，Streamlit Cloud 会自动重新部署；如果没更新，在控制台点 “Reboot app”。
+4. 在 Supabase SQL Editor 执行最新的 `schema.sql`，确保 `profiles`、`adhesion_literature`、`adhesion_experiments` 表存在，且 RLS 已启用。
+5. 在 Supabase Authentication 中创建/迁移用户；旧业务数据按 `profiles.username` 关联。
+6. 推送 `main` 后，Streamlit Cloud 会自动重新部署；如果没更新，在控制台点 “Reboot app”。
 
 ### 其他平台（SealOS / Docker / 服务器）
 
@@ -230,7 +264,7 @@ DEEPSEEK_MODEL = "deepseek-chat"
 - 特征响应曲线固定其他特征为均值/众数，只反映模型局部行为，不能当作因果效应。
 - 模型选择默认按测试集 R² 排序，存在一定乐观偏差；严谨实验建议使用独立验证集或嵌套交叉验证。
 - 还没有模型文件保存/加载、批量新样本预测、SHAP 解释和超参数搜索。
-- 公网部署前请补充登录限流、邮箱验证和更严格的 Supabase 权限方案。
+- Supabase Auth 已接入 RLS，但还没有登录限流、异常登录监测和审计日志；公网高流量场景建议再加一层网关/限流。
 
 ## 12. License
 

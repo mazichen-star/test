@@ -204,11 +204,16 @@ class SupabaseStorage(BaseStorage):
         self.url = url.rstrip("/")
         self.key = key
         self.timeout = timeout
+        self.access_token: str | None = None
         self.base_headers = {
             "apikey": key,
-            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         }
+
+    def set_access_token(self, access_token: str | None) -> None:
+        """Supabase Auth 登录后设置用户 JWT；RLS 依赖这个 token。"""
+
+        self.access_token = access_token or None
 
     def _request(
         self,
@@ -222,6 +227,9 @@ class SupabaseStorage(BaseStorage):
     ) -> Any:
         url = f"{self.url}/rest/v1/{table}"
         request_headers = dict(self.base_headers)
+        request_headers["Authorization"] = (
+            f"Bearer {self.access_token}" if self.access_token else f"Bearer {self.key}"
+        )
         if headers:
             request_headers.update(headers)
         try:

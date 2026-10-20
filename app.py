@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import smtplib
+import time
 from datetime import datetime
 from email.header import Header
 from email.mime.text import MIMEText
@@ -47,6 +48,7 @@ from core.modeling import (
 from core.reporting import excel_bytes, make_word_report
 from core.security import valid_password, valid_username
 from core.storage import StorageError, get_storage, storage_label
+from core.supabase_auth import SupabaseAuth, SupabaseAuthError
 
 try:
     from skopt import gp_minimize
@@ -499,6 +501,17 @@ except Exception as exc:
     st.error(f"存储初始化失败：{exc}")
     st.stop()
 
+SUPABASE_AUTH: SupabaseAuth | None = None
+if STORAGE.mode == "supabase":
+    try:
+        SUPABASE_AUTH = SupabaseAuth()
+    except Exception as exc:
+        st.error(f"Supabase Auth 初始化失败：{exc}")
+        st.stop()
+    _token = st.session_state.get("sb_access_token")
+    if _token:
+        STORAGE.set_access_token(_token)
+
 _ai_key, _, _ai_model = ai_config()
 _ai_status = tr("AI 已接入", "AI connected") if _ai_key else tr("AI 未配置", "AI not configured")
 st.markdown(
@@ -763,38 +776,206 @@ def _render_auth_forms() -> None:
                 st.success(generic)
 
 
+def _render_auth_aside() -> None:
+    st.markdown(
+        f"""
+        <aside class="auth-aside">
+          <h2>{tr("把实验数据变成可检查的预测。", "Turn lab data into predictions you can inspect.")}</h2>
+          <p>{tr(
+              "一个面向材料研发的工作台：数据、模型和文献证据放在同一处，结果可导出、可复核。",
+              "A workspace for materials R&D: data, models and literature evidence in one place.",
+          )}</p>
+          <div class="aside-item">
+            <strong>{tr("你的数据", "Your data")}</strong>
+            <span>{tr("上传 CSV / Excel，或从历史文件继续。", "Upload CSV / Excel or continue from a saved file.")}</span>
+          </div>
+          <div class="aside-item">
+            <strong>{tr("你的模型", "Your models")}</strong>
+            <span>{tr("从线性回归到 GPR，比较后选最优，并给出预测区间。", "From linear models to GPR, with prediction intervals.")}</span>
+          </div>
+          <div class="aside-item">
+            <strong>{tr("你的证据", "Your evidence")}</strong>
+            <span>{tr("文献提取、材料库、Excel 与 Word 报告都可追溯。", "Literature extraction, material library and exports.")}</span>
+          </div>
+          <div class="aside-note">{tr("当前存储", "Storage")} · {storage_label()}</div>
+        </aside>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _set_cloud_session(session: dict, email: str) -> None:
+    token = session["access_token"]
+    user = session.get("user") or SUPABASE_AUTH.get_user(token)
+    user_id = user.get("id")
+    if not user_id:
+        raise SupabaseAuthError("登录成功但未返回用户 ID")
+    profile = SUPABASE_AUTH.get_profile(token, user_id)
+    if not profile:
+        metadata = user.get("user_metadata") or {}
+        username = str(metadata.get("username") or email.split("@")[0])
+        profile = SUPABASE_AUTH.ensure_profile(token, user_id, username, email)
+    clear_user_state()
+    st.session_state.update(
+        {
+            "username": profile["username"],
+            "sb_access_token": token,
+            "sb_refresh_token": session.get("refresh_token", ""),
+            "sb_expires_at": session.get("expires_at", time.time() + 3600),
+            "sb_email": email,
+            "sb_user_id": user_id,
+        }
+    )
+    STORAGE.set_access_token(token)
+
+
+def _ensure_cloud_session() -> bool:
+    if not SUPABASE_AUTH:
+        return True
+    token = st.session_state.get("sb_access_token")
+    if not token:
+        return False
+    expires_at = float(st.session_state.get("sb_expires_at") or 0)
+    if expires_at and time.time() > expires_at - 60:
+        refresh_token = st.session_state.get("sb_refresh_token", "")
+        if not refresh_token:
+            return False
+        try:
+            session = SUPABASE_AUTH.refresh(refresh_token)
+        except SupabaseAuthError:
+            return False
+        st.session_state.update(
+            {
+                "sb_access_token": session["access_token"],
+                "sb_refresh_token": session.get("refresh_token", refresh_token),
+                "sb_expires_at": session.get("expires_at", time.time() + 3600),
+            }
+        )
+        token = session["access_token"]
+    STORAGE.set_access_token(token)
+    return bool(st.session_state.get("username"))
+
+
+def _render_cloud_auth_forms() -> None:
+    st.caption(
+        tr(
+            "云账号使用邮箱登录，密码和会话由 Supabase Auth 管理；数据访问通过 RLS 绑定到当前用户。",
+            "Cloud accounts use email; Supabase Auth and RLS bind data access to the current user.",
+        )
+    )
+    tab_login, tab_reg, tab_forgot = st.tabs(
+        [tr("登录", "Login"), tr("注册", "Register"), tr("忘记密码", "Forgot password")]
+    )
+
+    with tab_login:
+        with st.form("cloud_login_form"):
+            email = st.text_input(tr("邮箱", "Email"), key="cloud_login_email")
+            password = st.text_input(
+                tr("密码", "Password"), type="password", key="cloud_login_pw"
+            )
+            submitted = st.form_submit_button(
+                tr("登录", "Login"), type="primary", use_container_width=True
+            )
+        if submitted:
+            try:
+                session = SUPABASE_AUTH.sign_in(email.strip(), password)
+                _set_cloud_session(session, email.strip())
+                st.rerun()
+            except SupabaseAuthError as exc:
+                st.error(f"{tr('登录失败', 'Login failed')}：{exc}")
+
+    with tab_reg:
+        st.caption(
+            tr(
+                "用户名 5-20 位，只能包含数字、字母、下划线；密码至少 8 位，须包含数字和字母。",
+                "Username: 5-20 letters/digits/underscore. Password: 8+ chars with letters and digits.",
+            )
+        )
+        with st.form("cloud_register_form"):
+            username = st.text_input(tr("用户名", "Username"), key="cloud_reg_u")
+            email = st.text_input(tr("邮箱", "Email"), key="cloud_reg_email")
+            password = st.text_input(
+                tr("设置密码", "Password"), type="password", key="cloud_reg_pw"
+            )
+            confirm = st.text_input(
+                tr("确认密码", "Confirm password"), type="password", key="cloud_reg_pw2"
+            )
+            submitted = st.form_submit_button(
+                tr("注册", "Register"), use_container_width=True
+            )
+        if submitted:
+            if not valid_username(username):
+                st.warning(
+                    tr(
+                        "用户名需 5-20 位，只能使用数字、字母、下划线",
+                        "Username must be 5-20 letters/digits/underscore",
+                    )
+                )
+            elif not valid_password(password):
+                st.warning(
+                    tr(
+                        "密码至少 8 位，须同时包含数字和字母，不能含空格",
+                        "Password must be 8+ chars with letters and digits",
+                    )
+                )
+            elif not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email or ""):
+                st.warning(tr("请输入有效邮箱", "Please enter a valid email"))
+            elif password != confirm:
+                st.warning(tr("两次密码不一致", "Passwords do not match"))
+            else:
+                try:
+                    session = SUPABASE_AUTH.sign_up(
+                        email.strip(), password, username.strip()
+                    )
+                    if session:
+                        _set_cloud_session(session, email.strip())
+                        st.rerun()
+                    else:
+                        st.success(
+                            tr(
+                                "注册成功。请查收确认邮件，完成验证后再登录。",
+                                "Registered. Confirm your email, then log in.",
+                            )
+                        )
+                except SupabaseAuthError as exc:
+                    st.error(f"{tr('注册失败', 'Registration failed')}：{exc}")
+
+    with tab_forgot:
+        st.caption(
+            tr(
+                "输入绑定邮箱，Supabase Auth 会发送重置密码邮件。",
+                "Enter your email; Supabase Auth will send a password reset message.",
+            )
+        )
+        with st.form("cloud_forgot_form"):
+            email = st.text_input(tr("邮箱", "Email"), key="cloud_forgot_email")
+            submitted = st.form_submit_button(
+                tr("发送重置邮件", "Send reset email"), use_container_width=True
+            )
+        if submitted:
+            try:
+                SUPABASE_AUTH.recover(email.strip())
+                st.success(
+                    tr(
+                        "如果该邮箱已注册，重置邮件已发送，请检查收件箱。",
+                        "If the email is registered, a reset message has been sent.",
+                    )
+                )
+            except SupabaseAuthError as exc:
+                st.error(f"{tr('发送失败', 'Send failed')}：{exc}")
+
+
 def render_auth() -> None:
     """登录页：左侧表单，右侧说明工作台能做什么。"""
 
     left, right = st.columns([0.62, 0.38], gap="large")
     with left:
-        _render_auth_forms()
+        if SUPABASE_AUTH:
+            _render_cloud_auth_forms()
+        else:
+            _render_auth_forms()
     with right:
-        st.markdown(
-            f"""
-            <aside class="auth-aside">
-              <h2>{tr("把实验数据变成可检查的预测。", "Turn lab data into predictions you can inspect.")}</h2>
-              <p>{tr(
-                  "一个面向材料研发的工作台：数据、模型和文献证据放在同一处，结果可导出、可复核。",
-                  "A workspace for materials R&D: data, models and literature evidence in one place.",
-              )}</p>
-              <div class="aside-item">
-                <strong>{tr("你的数据", "Your data")}</strong>
-                <span>{tr("上传 CSV / Excel，或从历史文件继续。", "Upload CSV / Excel or continue from a saved file.")}</span>
-              </div>
-              <div class="aside-item">
-                <strong>{tr("你的模型", "Your models")}</strong>
-                <span>{tr("从线性回归到 GPR，比较后选最优，并给出预测区间。", "From linear models to GPR, with prediction intervals.")}</span>
-              </div>
-              <div class="aside-item">
-                <strong>{tr("你的证据", "Your evidence")}</strong>
-                <span>{tr("文献提取、材料库、Excel 与 Word 报告都可追溯。", "Literature extraction, material library and exports.")}</span>
-              </div>
-              <div class="aside-note">{tr("当前存储", "Storage")} · {storage_label()}</div>
-            </aside>
-            """,
-            unsafe_allow_html=True,
-        )
+        _render_auth_aside()
     st.stop()
 
 
@@ -815,6 +996,11 @@ def render_sidebar():
             unsafe_allow_html=True,
         )
         if st.button(tr("退出登录", "Log out"), use_container_width=True):
+            if SUPABASE_AUTH:
+                token = st.session_state.get("sb_access_token")
+                if token:
+                    SUPABASE_AUTH.sign_out(token)
+                STORAGE.set_access_token(None)
             clear_user_state()
             st.rerun()
 
@@ -851,7 +1037,27 @@ def render_sidebar():
                     st.warning(tr("两次新密码不一致", "Passwords do not match"))
                 else:
                     try:
-                        if not STORAGE.verify_user(
+                        if SUPABASE_AUTH:
+                            email = st.session_state.get("sb_email", "")
+                            if not email:
+                                st.error(tr("当前会话缺少邮箱，请重新登录", "Missing email; log in again"))
+                            else:
+                                # 用旧密码换一个新 session，确认当前密码正确
+                                session = SUPABASE_AUTH.sign_in(email, current_pw)
+                                token = session["access_token"]
+                                SUPABASE_AUTH.update_password(token, new_pw)
+                                st.session_state.update(
+                                    {
+                                        "sb_access_token": token,
+                                        "sb_refresh_token": session.get("refresh_token", ""),
+                                        "sb_expires_at": session.get(
+                                            "expires_at", time.time() + 3600
+                                        ),
+                                    }
+                                )
+                                STORAGE.set_access_token(token)
+                                st.success(tr("密码已修改", "Password changed"))
+                        elif not STORAGE.verify_user(
                             st.session_state["username"], current_pw
                         ):
                             st.error(tr("当前密码错误", "Current password is wrong"))
@@ -860,7 +1066,7 @@ def render_sidebar():
                                 st.session_state["username"], new_pw
                             )
                             st.success(tr("密码已修改", "Password changed"))
-                    except StorageError as exc:
+                    except (StorageError, SupabaseAuthError) as exc:
                         st.error(f"{tr('修改失败', 'Change failed')}：{exc}")
 
             st.markdown('<div class="side-space"></div>', unsafe_allow_html=True)
@@ -875,10 +1081,18 @@ def render_sidebar():
                 use_container_width=True,
             ):
                 try:
-                    STORAGE.delete_account(st.session_state["username"])
+                    if SUPABASE_AUTH:
+                        token = st.session_state.get("sb_access_token")
+                        if not token:
+                            raise SupabaseAuthError("登录已过期，请重新登录")
+                        SUPABASE_AUTH.delete_account(token)
+                        SUPABASE_AUTH.sign_out(token)
+                        STORAGE.set_access_token(None)
+                    else:
+                        STORAGE.delete_account(st.session_state["username"])
                     clear_user_state()
                     st.rerun()
-                except StorageError as exc:
+                except (StorageError, SupabaseAuthError) as exc:
                     st.error(f"{tr('删除失败', 'Delete failed')}：{exc}")
 
         st.markdown(
@@ -3233,7 +3447,11 @@ def render_adhesion_tab() -> None:
 
 # ============ 入口 ============
 def main() -> None:
-    if not st.session_state.get("username"):
+    if SUPABASE_AUTH:
+        if not _ensure_cloud_session():
+            clear_user_state()
+            render_auth()
+    elif not st.session_state.get("username"):
         render_auth()
 
     uploaded_file, chosen_file = render_sidebar()
