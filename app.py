@@ -856,6 +856,10 @@ def _ensure_cloud_session() -> bool:
     return bool(st.session_state.get("username"))
 
 
+def _cloud_auth_notice(kind: str, text: str) -> None:
+    st.session_state["cloud_auth_notice"] = (kind, text)
+
+
 def _render_cloud_auth_forms() -> None:
     st.caption(
         tr(
@@ -863,11 +867,19 @@ def _render_cloud_auth_forms() -> None:
             "Cloud accounts use email; Supabase Auth and RLS bind data access to the current user.",
         )
     )
-    tab_login, tab_reg, tab_forgot = st.tabs(
-        [tr("登录", "Login"), tr("注册", "Register"), tr("忘记密码", "Forgot password")]
+    login_label = tr("登录", "Login")
+    register_label = tr("注册", "Register")
+    forgot_label = tr("忘记密码", "Forgot password")
+    choice = st.segmented_control(
+        tr("账号操作", "Account action"),
+        [login_label, register_label, forgot_label],
+        default=login_label,
+        key="cloud_auth_mode",
+        label_visibility="collapsed",
     )
+    choice = choice or login_label
 
-    with tab_login:
+    if choice == login_label:
         with st.form("cloud_login_form"):
             email = st.text_input(tr("邮箱", "Email"), key="cloud_login_email")
             password = st.text_input(
@@ -878,13 +890,16 @@ def _render_cloud_auth_forms() -> None:
             )
         if submitted:
             try:
-                session = SUPABASE_AUTH.sign_in(email.strip(), password)
-                _set_cloud_session(session, email.strip())
+                with st.spinner(tr("正在登录…", "Signing in…")):
+                    session = SUPABASE_AUTH.sign_in(email.strip(), password)
+                    _set_cloud_session(session, email.strip())
                 st.rerun()
             except SupabaseAuthError as exc:
-                st.error(f"{tr('登录失败', 'Login failed')}：{exc}")
+                _cloud_auth_notice(
+                    "error", f"{tr('登录失败', 'Login failed')}：{exc}"
+                )
 
-    with tab_reg:
+    elif choice == register_label:
         st.caption(
             tr(
                 "用户名 5-20 位，只能包含数字、字母、下划线；密码至少 8 位，须包含数字和字母。",
@@ -905,42 +920,51 @@ def _render_cloud_auth_forms() -> None:
             )
         if submitted:
             if not valid_username(username):
-                st.warning(
+                _cloud_auth_notice(
+                    "warning",
                     tr(
                         "用户名需 5-20 位，只能使用数字、字母、下划线",
                         "Username must be 5-20 letters/digits/underscore",
-                    )
+                    ),
                 )
             elif not valid_password(password):
-                st.warning(
+                _cloud_auth_notice(
+                    "warning",
                     tr(
                         "密码至少 8 位，须同时包含数字和字母，不能含空格",
                         "Password must be 8+ chars with letters and digits",
-                    )
+                    ),
                 )
             elif not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email or ""):
-                st.warning(tr("请输入有效邮箱", "Please enter a valid email"))
+                _cloud_auth_notice(
+                    "warning", tr("请输入有效邮箱", "Please enter a valid email")
+                )
             elif password != confirm:
-                st.warning(tr("两次密码不一致", "Passwords do not match"))
+                _cloud_auth_notice(
+                    "warning", tr("两次密码不一致", "Passwords do not match")
+                )
             else:
                 try:
-                    session = SUPABASE_AUTH.sign_up(
-                        email.strip(), password, username.strip()
-                    )
-                    if session:
-                        _set_cloud_session(session, email.strip())
-                        st.rerun()
-                    else:
-                        st.success(
-                            tr(
-                                "注册成功。请查收确认邮件，完成验证后再登录。",
-                                "Registered. Confirm your email, then log in.",
-                            )
+                    with st.spinner(tr("正在创建账号…", "Creating account…")):
+                        session = SUPABASE_AUTH.sign_up(
+                            email.strip(), password, username.strip()
                         )
+                        if session:
+                            _set_cloud_session(session, email.strip())
+                            st.rerun()
+                    _cloud_auth_notice(
+                        "success",
+                        tr(
+                            "注册成功。请查收确认邮件，完成验证后再登录。",
+                            "Registered. Confirm your email, then log in.",
+                        ),
+                    )
                 except SupabaseAuthError as exc:
-                    st.error(f"{tr('注册失败', 'Registration failed')}：{exc}")
+                    _cloud_auth_notice(
+                        "error", f"{tr('注册失败', 'Registration failed')}：{exc}"
+                    )
 
-    with tab_forgot:
+    elif choice == forgot_label:
         st.caption(
             tr(
                 "输入绑定邮箱，Supabase Auth 会发送重置密码邮件。",
@@ -954,15 +978,29 @@ def _render_cloud_auth_forms() -> None:
             )
         if submitted:
             try:
-                SUPABASE_AUTH.recover(email.strip())
-                st.success(
+                with st.spinner(tr("正在发送…", "Sending…")):
+                    SUPABASE_AUTH.recover(email.strip())
+                _cloud_auth_notice(
+                    "success",
                     tr(
                         "如果该邮箱已注册，重置邮件已发送，请检查收件箱。",
                         "If the email is registered, a reset message has been sent.",
-                    )
+                    ),
                 )
             except SupabaseAuthError as exc:
-                st.error(f"{tr('发送失败', 'Send failed')}：{exc}")
+                _cloud_auth_notice(
+                    "error", f"{tr('发送失败', 'Send failed')}：{exc}"
+                )
+
+    notice = st.session_state.pop("cloud_auth_notice", None)
+    if notice:
+        kind, message = notice
+        if kind == "success":
+            st.success(message)
+        elif kind == "warning":
+            st.warning(message)
+        else:
+            st.error(message)
 
 
 def render_auth() -> None:
@@ -3449,7 +3487,6 @@ def render_adhesion_tab() -> None:
 def main() -> None:
     if SUPABASE_AUTH:
         if not _ensure_cloud_session():
-            clear_user_state()
             render_auth()
     elif not st.session_state.get("username"):
         render_auth()
