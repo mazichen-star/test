@@ -133,11 +133,11 @@ SUPABASE_KEY = "your-anon-key"
 
 > 安全提示：Supabase 模式现在使用 Supabase Auth + RLS。`anon` 角色不再拥有业务表读写权限；所有查询都带用户 JWT，RLS 通过 `auth.uid()` 和 `profiles.username` 限制到本人。不要把 `service_role` key 放进 Streamlit 或浏览器。
 
-### 5.0 旧账号迁移
+### 5.0 旧数据迁移（可跳过）
 
-旧的 `public.users` 表（用户名 + PBKDF2 密码）在云模式下不再用于登录，并且已对 `anon/authenticated` 锁死。
+如果你不需要旧账号和旧数据，直接跳过本节：执行 `schema.sql` 后，打开应用用邮箱注册一个新账号即可。
 
-迁移已有用户：
+旧的 `public.users` 表（用户名 + PBKDF2 密码）在云模式下不再用于登录，并且已对 `anon/authenticated` 锁死。若要保留旧业务数据，按下面迁移：
 
 1. Supabase Dashboard → **Authentication → Users → Add user**；
 2. 邮箱填旧账号的邮箱，密码设置一个新密码；
