@@ -21,6 +21,7 @@
 - **账号系统**：Supabase 模式使用 **Supabase Auth + RLS**（邮箱登录、邮箱找回、JWT 绑定用户）；本地 SQLite 调试模式使用 PBKDF2-HMAC-SHA256 + 随机盐，兼容旧版 SHA-256 哈希。
 - **存储**：线上使用 Supabase；本地未配置 Supabase 时自动使用 SQLite 仅作调试，Streamlit Cloud 上请务必配置 Supabase。
 - **界面**：统一浅色实验室工作台主题、中英文切换、窄屏适配；表格与指标使用同一套字阶和留白。
+- **图表文字**：英文/数字使用 Times New Roman，中文使用宋体；每张图可在页面内编辑中英文标题和横纵轴标题。
 
 ## 2. 本次完善的重点
 

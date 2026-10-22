@@ -45,7 +45,11 @@ from core.modeling import (
     predict_one,
     train_models,
 )
-from core.plotting import configure_plot_style, style_figure
+from core.plotting import (
+    apply_chart_text,
+    configure_plot_style,
+    style_figure,
+)
 from core.reporting import excel_bytes, make_word_report
 from core.security import valid_password, valid_username
 from core.storage import StorageError, get_storage, storage_label
@@ -1891,9 +1895,7 @@ def render_compare_tab() -> None:
                 )
                 ax.set_title(f"{label} ({unit})", fontsize=10)
                 ax.tick_params(labelsize=8)
-                style_figure(fig)
-                st.pyplot(fig)
-                plt.close(fig)
+                _render_chart(fig, f"compare_{index}")
 
     if material_a.get("reference"):
         st.caption(f"A {tr('参考文献', 'Reference')}：{material_a['reference']}")
@@ -2087,6 +2089,105 @@ def plot_feature_curves(result: dict) -> None:
     plt.close(fig)
 
 
+def _chart_text_editor(fig, key: str) -> None:
+    """每张图下方的文字编辑器；标题拆成中文 / 英文数字两栏。"""
+
+    if not fig.axes:
+        return
+    ax = fig.axes[0]
+    overrides = st.session_state.setdefault("chart_overrides", {})
+    saved = overrides.get(key, {})
+
+    default_title = ax.get_title()
+    default_x = ax.get_xlabel()
+    default_y = ax.get_ylabel()
+    has_cn = bool(re.search(r"[\u3400-\u9fff]", default_title or ""))
+
+    if "cn_title" in saved:
+        default_cn = saved["cn_title"]
+    else:
+        default_cn = default_title if has_cn else ""
+    if "en_title" in saved:
+        default_en = saved["en_title"]
+    else:
+        default_en = "" if has_cn else default_title
+    default_x = saved.get("xlabel", default_x)
+    default_y = saved.get("ylabel", default_y)
+
+    label = tr("编辑图表文字", "Edit chart text")
+    context = st.popover(label) if hasattr(st, "popover") else st.expander(label)
+    with context:
+        st.caption(
+            tr(
+                "中文标题用宋体，英文/数字标题用 Times New Roman；留空则不显示。",
+                "Chinese title uses Song; English/number title uses Times New Roman. Empty hides it.",
+            )
+        )
+        cn_title = st.text_input(
+            tr("中文标题", "Chinese title"),
+            value=default_cn,
+            key=f"chart_cn_{key}",
+        )
+        en_title = st.text_input(
+            tr("英文/数字标题", "English / number title"),
+            value=default_en,
+            key=f"chart_en_{key}",
+        )
+        xlabel = st.text_input(
+            tr("横轴标题", "X-axis label"),
+            value=default_x,
+            key=f"chart_x_{key}",
+        )
+        ylabel = st.text_input(
+            tr("纵轴标题", "Y-axis label"),
+            value=default_y,
+            key=f"chart_y_{key}",
+        )
+        apply_col, reset_col = st.columns(2)
+        with apply_col:
+            apply_now = st.button(
+                tr("应用", "Apply"),
+                key=f"chart_apply_{key}",
+                type="primary",
+                use_container_width=True,
+            )
+        with reset_col:
+            reset_now = st.button(
+                tr("恢复默认", "Reset"),
+                key=f"chart_reset_{key}",
+                use_container_width=True,
+            )
+        if apply_now:
+            overrides[key] = {
+                "cn_title": cn_title.strip(),
+                "en_title": en_title.strip(),
+                "xlabel": xlabel.strip(),
+                "ylabel": ylabel.strip(),
+            }
+            st.session_state["chart_overrides"] = overrides
+            st.rerun()
+        if reset_now:
+            overrides.pop(key, None)
+            st.session_state["chart_overrides"] = overrides
+            for suffix in ("cn", "en", "x", "y"):
+                st.session_state.pop(f"chart_{suffix}_{key}", None)
+            st.rerun()
+
+
+def _render_chart(fig, key: str | None = None) -> None:
+    """统一应用图表样式、用户文字覆盖，再渲染。"""
+
+    style_figure(fig)
+    if key:
+        override = st.session_state.get("chart_overrides", {}).get(key)
+        if override:
+            apply_chart_text(fig, **override)
+    st.pyplot(fig)
+    if key:
+        _chart_text_editor(fig, key)
+    plt.close(fig)
+
+
 def render_results(result: dict) -> None:
     metrics = result["metrics"]
     st.subheader(tr("训练结果", "Training results"))
@@ -2126,9 +2227,7 @@ def render_results(result: dict) -> None:
         importance.plot.barh(ax=ax, color="#0f5c5e")
         ax.set_xlabel(tr("重要性", "Importance"), fontsize=8)
         ax.tick_params(labelsize=8)
-        style_figure(fig)
-        st.pyplot(fig)
-        plt.close(fig)
+        _render_chart(fig, "importance")
 
     left, right = st.columns(2)
     with left:
@@ -2143,9 +2242,7 @@ def render_results(result: dict) -> None:
         ax.set_ylabel(tr("预测值", "Predicted"), fontsize=8)
         ax.set_title(f"{result['model_name']}", fontsize=9)
         ax.tick_params(labelsize=7)
-        style_figure(fig)
-        st.pyplot(fig)
-        plt.close(fig)
+        _render_chart(fig, "pred_true")
 
     with right:
         if result["is_gpr"] and result.get("y_std") is not None:
@@ -2180,9 +2277,7 @@ def render_results(result: dict) -> None:
             ax.set_ylabel(result["target_col"], fontsize=8)
             ax.tick_params(labelsize=7)
             ax.legend(fontsize=7)
-            style_figure(fig)
-            st.pyplot(fig)
-            plt.close(fig)
+            _render_chart(fig, "interval")
         else:
             st.subheader(tr("残差", "Residuals"))
             fig, ax = plt.subplots(figsize=(5.2, 3.8))
@@ -2192,9 +2287,7 @@ def render_results(result: dict) -> None:
             ax.set_xlabel(tr("预测值", "Predicted"), fontsize=8)
             ax.set_ylabel(tr("残差", "Residual"), fontsize=8)
             ax.tick_params(labelsize=7)
-            style_figure(fig)
-            st.pyplot(fig)
-            plt.close(fig)
+            _render_chart(fig, "residual")
 
     st.subheader(tr("特征拟合曲线", "Feature response curves"))
     st.caption(
@@ -2507,9 +2600,7 @@ def render_optimization(result: dict) -> None:
         ax.set_ylabel(f"Best {saved['target']}", fontsize=8)
         ax.tick_params(labelsize=7)
         ax.set_title(tr("收敛曲线", "Convergence"), fontsize=9)
-        style_figure(fig)
-        st.pyplot(fig)
-        plt.close(fig)
+        _render_chart(fig, "convergence")
         st.download_button(
             tr("下载寻优结果 CSV", "Download CSV"),
             data=pd.DataFrame(saved["display"]).to_csv(index=False).encode("utf-8-sig"),
@@ -2877,9 +2968,7 @@ def _plot_adhesion_importance(bundle: dict) -> None:
         importance.plot.barh(ax=ax, color="#6f8f6a")
         ax.set_title(tr("特征重要性", "Feature importance"))
         ax.tick_params(labelsize=8)
-        style_figure(fig)
-        st.pyplot(fig)
-        plt.close(fig)
+        _render_chart(fig, "adhesion_importance")
     except Exception:
         return
 
@@ -3320,9 +3409,7 @@ def render_adhesion_modeling(target_unit: str) -> None:
         ax.set_xlabel(tr("真实值", "True"))
         ax.set_ylabel(tr("预测值", "Predicted"))
         ax.set_title(tr("预测 vs 真实", "Predicted vs true"))
-        style_figure(fig)
-        st.pyplot(fig)
-        plt.close(fig)
+        _render_chart(fig, "adhesion_pred")
     with right:
         _plot_adhesion_importance(bundle)
 

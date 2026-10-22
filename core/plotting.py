@@ -192,5 +192,64 @@ def style_figure(
             )
 
 
-def style_current_figure(**kwargs) -> None:
-    style_figure(plt.gcf(), **kwargs)
+def apply_chart_text(
+    fig,
+    *,
+    cn_title: str = "",
+    en_title: str = "",
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    title_size: int = 16,
+    label_size: int = 15,
+) -> None:
+    """应用用户在页面里编辑的图表文字。
+
+    中文标题和英文/数字标题分成两行绘制，分别使用宋体和 Times，
+    避免 Matplotlib 单个 Text 无法逐字回退的问题。
+    """
+
+    if not fig.axes:
+        return
+    ax = fig.axes[0]
+
+    if xlabel is not None:
+        ax.set_xlabel(xlabel)
+        _style_text(ax.xaxis.label, size=label_size)
+    if ylabel is not None:
+        ax.set_ylabel(ylabel)
+        _style_text(ax.yaxis.label, size=label_size)
+
+    ax.set_title("")
+    if not (cn_title or en_title):
+        return
+
+    rows = []
+    if cn_title:
+        rows.append((cn_title, _CJK_FONT, 1.14 if en_title else 1.02))
+    if en_title:
+        rows.append((en_title, _TIMES_FONT, 1.02))
+
+    for text, family, y in rows:
+        obj = ax.text(
+            0.5,
+            y,
+            text,
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=title_size,
+            fontfamily=family,
+            fontweight="bold",
+            clip_on=False,
+            zorder=10,
+        )
+        if family == _CJK_FONT:
+            obj.set_path_effects(
+                [path_effects.withStroke(linewidth=0.6, foreground=obj.get_color())]
+            )
+
+    if cn_title and en_title:
+        try:
+            fig.subplots_adjust(top=min(fig.subplotpars.top, 0.78))
+        except Exception:
+            pass
