@@ -88,7 +88,7 @@ matplotlib.rcParams["font.sans-serif"] = [
     "DejaVu Sans",
 ]
 matplotlib.rcParams["axes.unicode_minus"] = False
-configure_plot_style(_CN_FONT)
+configure_plot_style()
 
 
 # ============ 多语言与主题 ============

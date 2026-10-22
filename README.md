@@ -59,13 +59,15 @@
 │   ├── modeling.py                 # 模型注册、训练、评估、CV
 │   ├── adhesion.py                 # PAA-DA 文献抽取、单位换算、小样本模型
 │   ├── supabase_auth.py            # Supabase Auth 登录、刷新、找回、删号
+│   ├── plotting.py                 # 图表字体：Times 数字 + 宋体中文
 │   └── reporting.py                # Excel / Word 导出
 ├── tests/
 │   ├── test_core.py                # 核心逻辑测试
 │   ├── test_adhesion.py            # 黏附模块测试
 │   └── test_supabase_auth.py       # Auth / JWT 请求头测试
 ├── fonts/
-│   └── NotoSansSC-Regular.ttf      # 图表中文字体
+│   ├── NotoSansSC-Regular.ttf      # 界面/备用中文字体
+│   └── NotoSerifSC-VF.ttf          # 图表宋体（英文/数字用 Times）
 ├── schema.sql                      # Supabase 建表 SQL
 ├── requirements.txt
 ├── requirements-optional.txt       # scikit-optimize（贝叶斯优化）

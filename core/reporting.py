@@ -121,7 +121,7 @@ def make_word_report(
             cells[3].text = f"{row.get('RMSE', float('nan')):.4f}"
 
     document.add_heading("3. 预测 vs 真实", 1)
-    configure_plot_style(font_name)
+    configure_plot_style()
     fig, ax = plt.subplots(figsize=(6, 5))
     try:
         if font_name:
