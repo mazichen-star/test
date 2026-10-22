@@ -45,6 +45,7 @@ from core.modeling import (
     predict_one,
     train_models,
 )
+from core.plotting import configure_plot_style, style_figure
 from core.reporting import excel_bytes, make_word_report
 from core.security import valid_password, valid_username
 from core.storage import StorageError, get_storage, storage_label
@@ -83,6 +84,7 @@ matplotlib.rcParams["font.sans-serif"] = [
     "DejaVu Sans",
 ]
 matplotlib.rcParams["axes.unicode_minus"] = False
+configure_plot_style(_CN_FONT)
 
 
 # ============ 多语言与主题 ============
@@ -1873,6 +1875,7 @@ def render_compare_tab() -> None:
                 )
                 ax.set_title(f"{label} ({unit})", fontsize=10)
                 ax.tick_params(labelsize=8)
+                style_figure(fig)
                 st.pyplot(fig)
                 plt.close(fig)
 
@@ -2062,6 +2065,7 @@ def plot_feature_curves(result: dict) -> None:
         ax.tick_params(labelsize=7)
         ax.set_title(f"{column} → {target_col}", fontsize=9)
         ax.legend(fontsize=7, loc="best")
+    style_figure(fig)
     fig.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
@@ -2106,6 +2110,7 @@ def render_results(result: dict) -> None:
         importance.plot.barh(ax=ax, color="#0f5c5e")
         ax.set_xlabel(tr("重要性", "Importance"), fontsize=8)
         ax.tick_params(labelsize=8)
+        style_figure(fig)
         st.pyplot(fig)
         plt.close(fig)
 
@@ -2122,6 +2127,7 @@ def render_results(result: dict) -> None:
         ax.set_ylabel(tr("预测值", "Predicted"), fontsize=8)
         ax.set_title(f"{result['model_name']}", fontsize=9)
         ax.tick_params(labelsize=7)
+        style_figure(fig)
         st.pyplot(fig)
         plt.close(fig)
 
@@ -2158,6 +2164,7 @@ def render_results(result: dict) -> None:
             ax.set_ylabel(result["target_col"], fontsize=8)
             ax.tick_params(labelsize=7)
             ax.legend(fontsize=7)
+            style_figure(fig)
             st.pyplot(fig)
             plt.close(fig)
         else:
@@ -2169,6 +2176,7 @@ def render_results(result: dict) -> None:
             ax.set_xlabel(tr("预测值", "Predicted"), fontsize=8)
             ax.set_ylabel(tr("残差", "Residual"), fontsize=8)
             ax.tick_params(labelsize=7)
+            style_figure(fig)
             st.pyplot(fig)
             plt.close(fig)
 
@@ -2483,6 +2491,7 @@ def render_optimization(result: dict) -> None:
         ax.set_ylabel(f"Best {saved['target']}", fontsize=8)
         ax.tick_params(labelsize=7)
         ax.set_title(tr("收敛曲线", "Convergence"), fontsize=9)
+        style_figure(fig)
         st.pyplot(fig)
         plt.close(fig)
         st.download_button(
@@ -2852,6 +2861,7 @@ def _plot_adhesion_importance(bundle: dict) -> None:
         importance.plot.barh(ax=ax, color="#6f8f6a")
         ax.set_title(tr("特征重要性", "Feature importance"))
         ax.tick_params(labelsize=8)
+        style_figure(fig)
         st.pyplot(fig)
         plt.close(fig)
     except Exception:
@@ -3294,6 +3304,7 @@ def render_adhesion_modeling(target_unit: str) -> None:
         ax.set_xlabel(tr("真实值", "True"))
         ax.set_ylabel(tr("预测值", "Predicted"))
         ax.set_title(tr("预测 vs 真实", "Predicted vs true"))
+        style_figure(fig)
         st.pyplot(fig)
         plt.close(fig)
     with right:

@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from .plotting import configure_plot_style, style_figure
+
 
 def excel_bytes(
     data_out: pd.DataFrame,
@@ -119,6 +121,7 @@ def make_word_report(
             cells[3].text = f"{row.get('RMSE', float('nan')):.4f}"
 
     document.add_heading("3. 预测 vs 真实", 1)
+    configure_plot_style(font_name)
     fig, ax = plt.subplots(figsize=(6, 5))
     try:
         if font_name:
@@ -131,8 +134,9 @@ def make_word_report(
         ax.set_xlabel("真实值")
         ax.set_ylabel("预测值")
         ax.set_title(f"{model_name}  R²={metrics.get('r2', float('nan')):.3f}")
+        style_figure(fig)
         image = io.BytesIO()
-        fig.savefig(image, format="png", dpi=150, bbox_inches="tight")
+        fig.savefig(image, format="png", dpi=300, bbox_inches="tight")
         image.seek(0)
         document.add_picture(image, width=Inches(5))
     finally:

@@ -8,5 +8,6 @@ __all__ = [
     "modeling",
     "adhesion",
     "supabase_auth",
+    "plotting",
     "reporting",
 ]
