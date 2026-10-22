@@ -49,7 +49,11 @@ from core.plotting import configure_plot_style, style_figure
 from core.reporting import excel_bytes, make_word_report
 from core.security import valid_password, valid_username
 from core.storage import StorageError, get_storage, storage_label
-from core.supabase_auth import SupabaseAuth, SupabaseAuthError
+from core.supabase_auth import (
+    SupabaseAuth,
+    SupabaseAuthError,
+    friendly_auth_error,
+)
 
 try:
     from skopt import gp_minimize
@@ -891,15 +895,25 @@ def _render_cloud_auth_forms() -> None:
                 tr("登录", "Login"), type="primary", use_container_width=True
             )
         if submitted:
-            try:
-                with st.spinner(tr("正在登录…", "Signing in…")):
-                    session = SUPABASE_AUTH.sign_in(email.strip(), password)
-                    _set_cloud_session(session, email.strip())
-                st.rerun()
-            except SupabaseAuthError as exc:
+            if not email.strip() or not password:
                 _cloud_auth_notice(
-                    "error", f"{tr('登录失败', 'Login failed')}：{exc}"
+                    "warning", tr("请输入邮箱和密码", "Please enter email and password")
                 )
+            elif not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email or ""):
+                _cloud_auth_notice(
+                    "warning", tr("请输入有效邮箱", "Please enter a valid email")
+                )
+            else:
+                try:
+                    with st.spinner(tr("正在登录…", "Signing in…")):
+                        session = SUPABASE_AUTH.sign_in(email.strip(), password)
+                        _set_cloud_session(session, email.strip())
+                    st.rerun()
+                except SupabaseAuthError as exc:
+                    _cloud_auth_notice(
+                        "error",
+                        f"{tr('登录失败', 'Login failed')}：{friendly_auth_error(exc)}",
+                    )
 
     elif choice == register_label:
         st.caption(
@@ -963,7 +977,8 @@ def _render_cloud_auth_forms() -> None:
                     )
                 except SupabaseAuthError as exc:
                     _cloud_auth_notice(
-                        "error", f"{tr('注册失败', 'Registration failed')}：{exc}"
+                        "error",
+                        f"{tr('注册失败', 'Registration failed')}：{friendly_auth_error(exc, 'register')}",
                     )
 
     elif choice == forgot_label:
@@ -991,7 +1006,8 @@ def _render_cloud_auth_forms() -> None:
                 )
             except SupabaseAuthError as exc:
                 _cloud_auth_notice(
-                    "error", f"{tr('发送失败', 'Send failed')}：{exc}"
+                    "error",
+                    f"{tr('发送失败', 'Send failed')}：{friendly_auth_error(exc, 'recover')}",
                 )
 
     notice = st.session_state.pop("cloud_auth_notice", None)

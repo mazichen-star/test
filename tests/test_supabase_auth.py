@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
 import requests
 
 from core.storage import SupabaseStorage
-from core.supabase_auth import SupabaseAuth
+from core.supabase_auth import SupabaseAuth, SupabaseAuthError, friendly_auth_error
 
 
 class FakeResponse:
@@ -58,6 +59,39 @@ def test_storage_uses_user_token_for_rls(monkeypatch):
     auth_header = calls[0][2]["headers"]["Authorization"]
     assert auth_header == "Bearer user-jwt"
     assert calls[0][2]["headers"]["apikey"] == "anon-key"
+
+
+def test_invalid_credentials_keeps_error_code(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        return FakeResponse(
+            400,
+            {
+                "error_code": "invalid_credentials",
+                "msg": "Invalid login credentials",
+            },
+        )
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    auth = SupabaseAuth("https://example.supabase.co", "anon-key")
+    with pytest.raises(SupabaseAuthError) as info:
+        auth.sign_in("nobody@example.com", "wrong-password")
+    assert info.value.code == "invalid_credentials"
+    assert info.value.status == 400
+
+
+def test_friendly_login_error():
+    exc = SupabaseAuthError(
+        "Invalid login credentials", code="invalid_credentials", status=400
+    )
+    message = friendly_auth_error(exc)
+    assert "账号不存在或密码不正确" in message
+    assert "注册" in message
+
+
+def test_friendly_unconfirmed_error():
+    exc = SupabaseAuthError("Email not confirmed", code="email_not_confirmed", status=400)
+    message = friendly_auth_error(exc)
+    assert "邮箱尚未验证" in message
 
 
 def test_refresh_and_profile(monkeypatch):

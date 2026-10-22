@@ -19,17 +19,36 @@ from .config import supabase_key, supabase_url
 class SupabaseAuthError(RuntimeError):
     """可展示给用户的认证错误。"""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code or ""
+        self.status = status
 
-def _error_message(response: requests.Response) -> str:
+
+def _error_info(response: requests.Response) -> tuple[str, str]:
     try:
         data = response.json()
     except ValueError:
-        return response.text[:300]
+        return response.text[:300], ""
+    if isinstance(data, str):
+        return data[:300], ""
+    if not isinstance(data, dict):
+        return response.text[:300], ""
+    raw_code = data.get("error_code") or data.get("code") or ""
+    if not raw_code and isinstance(data.get("error"), str):
+        raw_code = data["error"]
+    code = str(raw_code) if raw_code else ""
     for key in ("msg", "message", "error_description", "error"):
         value = data.get(key)
-        if value:
-            return str(value)
-    return response.text[:300]
+        if value and not isinstance(value, dict):
+            return str(value), code
+    return response.text[:300], code
 
 
 class SupabaseAuth:
@@ -65,7 +84,10 @@ class SupabaseAuth:
         except requests.RequestException as exc:
             raise SupabaseAuthError(f"无法连接 Supabase Auth：{exc}") from exc
         if response.status_code >= 400:
-            raise SupabaseAuthError(_error_message(response))
+            message, code = _error_info(response)
+            raise SupabaseAuthError(
+                message, code=code, status=response.status_code
+            )
         if response.status_code == 204 or not response.content:
             return None
         try:
@@ -177,3 +199,41 @@ class SupabaseAuth:
         except SupabaseAuthError:
             # 本地 session 清除比服务端注销更重要
             pass
+
+
+def friendly_auth_error(exc: SupabaseAuthError, action: str = "login") -> str:
+    """把 Supabase Auth 的英文错误转成可操作的中文提示。"""
+
+    code = (getattr(exc, "code", "") or "").lower()
+    text = str(exc)
+    lowered = text.lower()
+
+    if code in {"invalid_credentials", "invalid_grant"} or "invalid login credentials" in lowered:
+        if action == "login":
+            return (
+                "账号不存在或密码不正确。请检查邮箱和密码；"
+                "如果还没有账号，请先切换到「注册」。"
+            )
+        return "邮箱或密码不正确。"
+    if code == "email_not_confirmed" or "email not confirmed" in lowered:
+        return (
+            "邮箱尚未验证。请先查收 Supabase 确认邮件；"
+            "如果收不到，可在 Supabase 控制台暂时关闭 Confirm email。"
+        )
+    if code == "user_not_found" or "user not found" in lowered:
+        return "该邮箱尚未注册，请先切换到「注册」。"
+    if code == "email_address_invalid" or "invalid email" in lowered:
+        return "邮箱格式不正确，请检查后重试。"
+    if code == "user_already_exists" or "user already registered" in lowered:
+        return "该邮箱已注册，请直接切换到「登录」。"
+    if "duplicate key" in lowered and "profiles" in lowered:
+        return "用户名已被占用，请换一个。"
+    if "password" in lowered and (
+        "least" in lowered or "weak" in lowered or "characters" in lowered
+    ):
+        return f"密码不符合要求：{text}"
+    if code == "over_request_rate_limit" or "rate limit" in lowered or "too many" in lowered:
+        return "尝试次数过多，请稍后再试。"
+    if "signup" in code and "disabled" in lowered:
+        return "当前 Supabase 项目未开放注册，请在 Authentication 中启用 Email 注册。"
+    return text
