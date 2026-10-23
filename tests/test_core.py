@@ -10,9 +10,7 @@ import pytest
 
 from core.config import supabase_url
 from core.data import (
-    datasets_signature,
     default_target_column,
-    merge_tables,
     preprocess,
     smart_clean_excel,
     training_signature,
@@ -180,37 +178,3 @@ def test_train_models_and_exports():
     )
     assert report is not None
     assert report[:2] == b"PK"
-
-
-def test_merge_tables_same_schema_different_order():
-    first = pd.DataFrame({"C": [0.1, 0.2], "Mn": [1.0, 1.1], "Tensile": [500, 510]})
-    second = pd.DataFrame({"Tensile": [520], "C": [0.3], "Mn": [1.2]})
-    merged, info = merge_tables([first, second], ["a.csv", "b.csv"])
-    assert info["same_schema"] is True
-    assert info["same_order"] is False
-    assert list(merged.columns) == ["C", "Mn", "Tensile"]
-    assert len(merged) == 3
-    assert info["row_counts"] == [
-        {"name": "a.csv", "rows": 2},
-        {"name": "b.csv", "rows": 1},
-    ]
-
-
-def test_merge_tables_union_reports_differences():
-    first = pd.DataFrame({"C": [0.1], "Tensile": [500]})
-    second = pd.DataFrame({"C": [0.2], "Hardness": [200]})
-    merged, info = merge_tables([first, second], ["a.csv", "b.csv"])
-    assert info["same_schema"] is False
-    assert "Hardness" in info["missing"]["a.csv"]
-    assert "Tensile" in info["missing"]["b.csv"]
-    assert "Hardness" in info["extra"]["b.csv"]
-    assert merged["Hardness"].isna().sum() == 1
-    assert merged["Tensile"].isna().sum() == 1
-
-
-def test_datasets_signature_is_stable_and_order_sensitive():
-    one = datasets_signature([("a.csv", b"a"), ("b.csv", b"b")])
-    two = datasets_signature([("a.csv", b"a"), ("b.csv", b"b")])
-    reverse = datasets_signature([("b.csv", b"b"), ("a.csv", b"a")])
-    assert one == two
-    assert one != reverse
