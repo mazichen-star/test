@@ -32,10 +32,12 @@ from core.config import ai_config, get_secret, smtp_configured
 from core.data import (
     DataError,
     dataset_signature,
+    datasets_signature,
     default_feature_columns,
     default_target_column,
     frame_signature,
     load_table_bytes,
+    merge_tables,
     training_signature,
 )
 from core.modeling import (
@@ -1159,11 +1161,23 @@ def render_sidebar():
             f'<div class="side-section">{tr("数据文件", "Data file")}</div>',
             unsafe_allow_html=True,
         )
-        uploaded_file = st.file_uploader(
-            tr("上传数据文件", "Upload data file"),
+        uploaded_files = st.file_uploader(
+            tr("上传数据文件（可多选）", "Upload data files (multiple)"),
             type=["csv", "xlsx", "xls"],
+            accept_multiple_files=True,
             key="data_upload",
+            help=tr(
+                "一次选择多个同类型文件，会自动合并成一个数据集。",
+                "Select multiple compatible files; they are merged into one dataset.",
+            ),
         )
+        if uploaded_files and len(uploaded_files) > 1:
+            st.caption(
+                tr(
+                    f"已选择 {len(uploaded_files)} 个文件，合并后一起训练。",
+                    f"{len(uploaded_files)} files selected; they will be merged.",
+                )
+            )
 
         st.markdown(
             f'<div class="side-section">{tr("历史文件", "Saved files")}</div>',
@@ -1205,7 +1219,7 @@ def render_sidebar():
             chosen = none_label
             st.caption(tr("暂无历史文件", "No saved files yet"))
 
-        return uploaded_file, chosen
+        return uploaded_files, chosen
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
@@ -2610,23 +2624,73 @@ def render_optimization(result: dict) -> None:
 
 
 # ============ 建模主流程 ============
-def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
-    content: bytes | None = None
+def render_modeling_tab(uploaded_files, chosen_file: str) -> None:
+    df: pd.DataFrame | None = None
     data_source = ""
+    raw_signature = ""
+    merge_info: dict | None = None
+    merge_files: list[str] = []
     none_label = tr("（不加载）", "(none)")
 
-    if uploaded_file is not None:
-        content = uploaded_file.getvalue()
-        data_source = uploaded_file.name
-        signature = dataset_signature(content, data_source)
-        if st.session_state.get("saved_upload_signature") != signature:
+    if uploaded_files:
+        frames: list[pd.DataFrame] = []
+        names: list[str] = []
+        items: list[tuple[str, bytes]] = []
+        read_failures: list[str] = []
+        save_failures: list[str] = []
+        saved_signatures = st.session_state.setdefault("saved_upload_signatures", set())
+
+        for file in uploaded_files:
+            content = file.getvalue()
+            name = file.name
             try:
-                STORAGE.save_user_file(
-                    st.session_state["username"], data_source, content
-                )
-                st.session_state["saved_upload_signature"] = signature
-            except StorageError as exc:
-                st.warning(f"{tr('保存到云端失败', 'Cloud save failed')}：{exc}")
+                frame = load_table_cached(content, name)
+            except DataError as exc:
+                read_failures.append(f"{name}: {exc}")
+                continue
+
+            frames.append(frame)
+            names.append(name)
+            items.append((name, content))
+            signature = dataset_signature(content, name)
+            if signature not in saved_signatures:
+                try:
+                    STORAGE.save_user_file(
+                        st.session_state["username"], name, content
+                    )
+                    saved_signatures.add(signature)
+                except StorageError as exc:
+                    save_failures.append(f"{name}: {exc}")
+        st.session_state["saved_upload_signatures"] = saved_signatures
+
+        if read_failures:
+            st.error(
+                f"{tr('部分文件读取失败', 'Some files could not be read')}："
+                + "；".join(read_failures)
+            )
+        if save_failures:
+            st.warning(
+                f"{tr('部分文件未保存到历史文件', 'Some files were not saved to history')}："
+                + "；".join(save_failures)
+            )
+        if not frames:
+            return
+
+        try:
+            df, merge_info = merge_tables(frames, names)
+        except DataError as exc:
+            st.error(f"{tr('合并失败', 'Merge failed')}：{exc}")
+            return
+
+        raw_signature = datasets_signature(items)
+        merge_files = names
+        if len(frames) == 1:
+            data_source = names[0]
+        else:
+            data_source = tr(
+                f"{len(frames)} 个文件合并",
+                f"{len(frames)} files merged",
+            )
     elif chosen_file and chosen_file != none_label:
         try:
             content = STORAGE.load_user_file(
@@ -2639,22 +2703,28 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
         if content is None:
             st.error(tr("读取历史文件失败", "Failed to load saved file"))
             return
+        try:
+            df = load_table_cached(content, data_source)
+        except DataError as exc:
+            st.error(f"{tr('文件读取失败', 'Read failed')}：{exc}")
+            return
+        raw_signature = dataset_signature(content, data_source)
 
-    if content is None:
+    if df is None:
         st.markdown(
             f"""
             <div class="empty-state">
               <h2>{tr("从一份数据表开始", "Start with a data table")}</h2>
               <p>{tr(
                   "上传记录成分、工艺与性能的 CSV / Excel，或从左侧加载历史文件。"
-                  "训练后会在这里看到指标、图表和新样本预测。",
+                  "可以一次选择多个同类型文件，合并后一起训练。",
                   "Upload a CSV / Excel with composition, process and properties, "
-                  "or load a saved file. Metrics, charts and predictions appear here.",
+                  "or load a saved file. Select multiple compatible files to merge.",
               )}</p>
               <div class="empty-points">
                 <div><strong>{tr("目标列", "Target")}</strong>{tr("要预测的力学性能，如抗拉强度。", "The property to predict.")}</div>
                 <div><strong>{tr("特征列", "Features")}</strong>{tr("成分、工艺参数、组织结构等输入。", "Composition, process, structure.")}</div>
-                <div><strong>{tr("导出", "Export")}</strong>{tr("预测明细 Excel 与 Word 报告。", "Prediction Excel and Word report.")}</div>
+                <div><strong>{tr("合并", "Merge")}</strong>{tr("多个同类型文件可合并成一个数据集。", "Merge multiple compatible files into one dataset.")}</div>
               </div>
             </div>
             """,
@@ -2667,14 +2737,6 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
             )
         )
         return
-
-    try:
-        df = load_table_cached(content, data_source)
-    except DataError as exc:
-        st.error(f"{tr('文件读取失败', 'Read failed')}：{exc}")
-        return
-
-    raw_signature = dataset_signature(content, data_source)
     old_result = st.session_state.get("train_result")
     if old_result and old_result.get("raw_data_signature") not in (
         None,
@@ -2700,6 +2762,48 @@ def render_modeling_tab(uploaded_file, chosen_file: str) -> None:
         expanded=False,
     ):
         st.dataframe(df.head(20), use_container_width=True, height=260)
+
+    if merge_info and len(merge_files) > 1:
+        if not merge_info.get("same_schema"):
+            st.warning(
+                tr(
+                    "这些文件的列不完全一致，已按列名并集合并；缺失的列会留空。"
+                    "训练前请确认这些差异是可以接受的。",
+                    "These files do not share exactly the same columns. "
+                    "They were merged by column union and missing cells are blank.",
+                )
+            )
+        with st.expander(
+            tr("合并明细与列差异", "Merge details and column differences"),
+            expanded=not merge_info.get("same_schema"),
+        ):
+            st.dataframe(
+                pd.DataFrame(merge_info["row_counts"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+            if merge_info.get("missing"):
+                st.caption(tr("缺失列", "Missing columns"))
+                for name, columns in merge_info["missing"].items():
+                    st.caption(f"{name}: {', '.join(columns)}")
+            if merge_info.get("extra"):
+                st.caption(tr("额外列", "Extra columns"))
+                for name, columns in merge_info["extra"].items():
+                    st.caption(f"{name}: {', '.join(columns)}")
+            st.caption(
+                tr(
+                    "按列名对齐合并；同一样本在多份文件中出现时会保留为多行。",
+                    "Merged by column name; identical rows from different files are kept.",
+                )
+            )
+            st.download_button(
+                tr("下载合并后的 CSV", "Download merged CSV"),
+                data=df.to_csv(index=False).encode("utf-8-sig"),
+                file_name="merged_dataset.csv",
+                mime="text/csv",
+                key="download_merged_csv",
+                use_container_width=True,
+            )
 
     df, cleaned = apply_ai_cleaning(df)
     df = df.copy()
@@ -3605,7 +3709,7 @@ def main() -> None:
     elif not st.session_state.get("username"):
         render_auth()
 
-    uploaded_file, chosen_file = render_sidebar()
+    uploaded_files, chosen_file = render_sidebar()
 
     tab_model, tab_library, tab_compare, tab_adhesion = st.tabs(
         [
@@ -3616,7 +3720,7 @@ def main() -> None:
         ]
     )
     with tab_model:
-        render_modeling_tab(uploaded_file, chosen_file)
+        render_modeling_tab(uploaded_files, chosen_file)
     with tab_library:
         render_library_tab()
     with tab_compare:
